@@ -1,0 +1,162 @@
+{
+  "name": "agent-code",
+  "displayName": "Agent Code",
+  "description": "🤖 AI-powered coding assistant using local LLM (DeepSeek-Coder via Ollama)",
+  "version": "0.1.0",
+  "publisher": "agent-code",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Programming Languages", "Machine Learning", "Other"],
+  "keywords": ["ai", "copilot", "code-assistant", "ollama", "deepseek"],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "agent-code.edit",
+        "title": "Agent Code: Edit Selection",
+        "icon": "$(edit)"
+      },
+      {
+        "command": "agent-code.explain",
+        "title": "Agent Code: Explain Selection"
+      },
+      {
+        "command": "agent-code.review",
+        "title": "Agent Code: Review File"
+      },
+      {
+        "command": "agent-code.generate",
+        "title": "Agent Code: Generate Code"
+      },
+      {
+        "command": "agent-code.acceptEdit",
+        "title": "Agent Code: Accept Changes",
+        "icon": "$(check)"
+      },
+      {
+        "command": "agent-code.rejectEdit",
+        "title": "Agent Code: Reject Changes",
+        "icon": "$(close)"
+      },
+      {
+        "command": "agent-code.toggleInline",
+        "title": "Agent Code: Toggle Inline Completions"
+      },
+      {
+        "command": "agent-code.chatFocus",
+        "title": "Agent Code: Open Chat"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "agent-code.edit",
+        "key": "ctrl+shift+e",
+        "mac": "cmd+shift+e",
+        "when": "editorHasSelection"
+      },
+      {
+        "command": "agent-code.explain",
+        "key": "ctrl+shift+h",
+        "mac": "cmd+shift+h",
+        "when": "editorHasSelection"
+      },
+      {
+        "command": "agent-code.acceptEdit",
+        "key": "ctrl+shift+y",
+        "mac": "cmd+shift+y"
+      },
+      {
+        "command": "agent-code.rejectEdit",
+        "key": "ctrl+shift+n",
+        "mac": "cmd+shift+n"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "agent-code.edit",
+          "group": "agentCode@1",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "agent-code.explain",
+          "group": "agentCode@2",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "agent-code.review",
+          "group": "agentCode@3"
+        }
+      ]
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "agent-code-sidebar",
+          "title": "Agent Code",
+          "icon": "$(hubot)"
+        }
+      ]
+    },
+    "views": {
+      "agent-code-sidebar": [
+        {
+          "type": "webview",
+          "id": "agent-code.chatView",
+          "name": "Chat"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Agent Code",
+      "properties": {
+        "agentCode.ollamaUrl": {
+          "type": "string",
+          "default": "http://localhost:11434",
+          "description": "Ollama server URL"
+        },
+        "agentCode.model": {
+          "type": "string",
+          "default": "deepseek-coder-v2:16b",
+          "description": "LLM model name"
+        },
+        "agentCode.inlineEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable inline ghost text completions"
+        },
+        "agentCode.inlineDelay": {
+          "type": "number",
+          "default": 600,
+          "description": "Delay (ms) before triggering inline completion"
+        },
+        "agentCode.temperature": {
+          "type": "number",
+          "default": 0.1,
+          "description": "LLM temperature (lower = more deterministic)"
+        },
+        "agentCode.maxContextLines": {
+          "type": "number",
+          "default": 100,
+          "description": "Max lines of context to send to LLM"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.3.0"
+  },
+  "dependencies": {}
+}
