@@ -1,11 +1,11 @@
 #!/bin/bash
 ###############################################################################
-# run.sh — Khởi động Ollama + mở VS Code với Agent Code extension
+# run.sh — Khởi động Ollama local + mở VS Code với Agent Code extension
 #
 # Tự động:
-#   1. Activate Python venv
-#   2. Start Ollama server
-#   3. Check model
+#   1. Activate Python venv (python/)
+#   2. Start Ollama local (ollama/bin/ollama)
+#   3. Check model (models/)
 #   4. Compile extension nếu cần
 #   5. Mở VS Code
 #
@@ -14,8 +14,16 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-VENV_DIR="$SCRIPT_DIR/.venv"
+VENV_DIR="$SCRIPT_DIR/python"
+PYTHON_EXE="$VENV_DIR/bin/python3"
 EXT_DIR="$SCRIPT_DIR/vscode-extension"
+
+OLLAMA_BIN="$SCRIPT_DIR/ollama/bin/ollama"
+OLLAMA_HOST="http://127.0.0.1:11435"
+OLLAMA_MODELS="$SCRIPT_DIR/models"
+
+export OLLAMA_HOST
+export OLLAMA_MODELS
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -29,16 +37,16 @@ error() { echo -e "${RED}[✗]${NC} $1"; exit 1; }
 
 echo ""
 echo "═══════════════════════════════════════════════════"
-echo "  🤖 Agent Code — Khởi động"
+echo "  🤖 Agent Code — Khởi động (Self-Contained)"
 echo "═══════════════════════════════════════════════════"
 echo ""
 
 # ── 1. Check env_setup đã chạy chưa ──────────────────────────────
-if [ ! -d "$VENV_DIR" ]; then
+if [ ! -d "$VENV_DIR" ] || [ ! -f "$PYTHON_EXE" ]; then
     error "Chưa setup! Chạy ./env_setup.sh trước."
 fi
 
-if ! command -v ollama &>/dev/null; then
+if [ ! -f "$OLLAMA_BIN" ]; then
     error "Ollama chưa cài! Chạy ./env_setup.sh trước."
 fi
 
@@ -51,30 +59,30 @@ echo "── Activate Python venv ──"
 source "$VENV_DIR/bin/activate"
 info "Python venv activated: $(which python)"
 
-# ── 3. Start Ollama server ────────────────────────────────────────
+# ── 3. Start Ollama local server ──────────────────────────────────
 echo ""
-echo "── Khởi động Ollama server ──"
+echo "── Khởi động Ollama local ──"
 
-if curl -s http://localhost:11434/api/tags &>/dev/null; then
-    info "Ollama đã chạy trên :11434"
+if curl -s --max-time 2 "$OLLAMA_HOST/api/tags" &>/dev/null; then
+    info "Ollama local đã chạy trên :11435"
 else
-    ollama serve &>/dev/null &
+    OLLAMA_HOST="$OLLAMA_HOST" OLLAMA_MODELS="$OLLAMA_MODELS" "$OLLAMA_BIN" serve &>/dev/null &
     OLLAMA_PID=$!
-    echo -n "  Đang khởi động Ollama..."
+    echo -n "  Đang khởi động Ollama local..."
 
     for i in {1..15}; do
-        if curl -s http://localhost:11434/api/tags &>/dev/null; then
+        if curl -s --max-time 2 "$OLLAMA_HOST/api/tags" &>/dev/null; then
             echo ""
-            info "Ollama đã start (PID: $OLLAMA_PID)"
+            info "Ollama local đã start (PID: $OLLAMA_PID)"
             break
         fi
         echo -n "."
         sleep 1
     done
 
-    if ! curl -s http://localhost:11434/api/tags &>/dev/null; then
+    if ! curl -s --max-time 2 "$OLLAMA_HOST/api/tags" &>/dev/null; then
         echo ""
-        error "Ollama không khởi động được!"
+        error "Ollama local không khởi động được!"
     fi
 fi
 
@@ -82,11 +90,11 @@ fi
 echo ""
 echo "── Check model ──"
 
-if ollama list 2>/dev/null | grep -q "deepseek-coder-v2:16b"; then
+if OLLAMA_HOST="$OLLAMA_HOST" "$OLLAMA_BIN" list 2>/dev/null | grep -q "deepseek-coder-v2:16b"; then
     info "Model deepseek-coder-v2:16b sẵn sàng"
 else
     warn "Model chưa tải. Đang pull..."
-    ollama pull deepseek-coder-v2:16b
+    OLLAMA_HOST="$OLLAMA_HOST" OLLAMA_MODELS="$OLLAMA_MODELS" "$OLLAMA_BIN" pull deepseek-coder-v2:16b
     info "Model đã tải xong"
 fi
 
@@ -133,7 +141,7 @@ echo "    agent-code explain --file utils.py"
 echo "    agent-code review --file api.py"
 echo "    agent-code generate \"Flask server\""
 echo ""
-echo "  Ollama: http://localhost:11434"
+echo "  Ollama local: $OLLAMA_HOST"
 echo "  Nhấn Ctrl+C để thoát (Ollama vẫn chạy nền)"
 echo ""
 

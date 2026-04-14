@@ -7,3 +7,19 @@ venv/
 env/
 .env
 ENV/
+
+# Self-contained dependencies
+# ===========================
+python/
+ollama/
+models/
+
+# Node
+# ===========================
+node_modules/
+
+# Build
+# ===========================
+*.egg-info/
+dist/
+build/

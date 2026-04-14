@@ -9,7 +9,7 @@ class Settings(BaseModel):
     """Application settings with sensible defaults."""
 
     ollama_url: str = Field(
-        default="http://localhost:11434",
+        default="http://127.0.0.1:11435",
         description="Ollama server URL",
     )
     model: str = Field(

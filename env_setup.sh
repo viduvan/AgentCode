@@ -1,22 +1,93 @@
 #!/bin/bash
 ###############################################################################
-# env_setup.sh — Tải và cài đặt mọi thứ cần thiết VÀO THƯ MỤC DỰ ÁN
+# env_setup.sh — Tải và cài đặt mọi thứ VÀO THƯ MỤC DỰ ÁN (self-contained)
 #
-# Sẽ tạo:
-#   - .venv/              Python virtual environment
+# Cấu trúc tạo ra:
+#   - python/              Python virtual environment
+#   - ollama/bin/ollama    Ollama binary (local)
+#   - models/              Ollama model storage
 #   - vscode-extension/node_modules/  Node dependencies
-#   - Tải Ollama nếu chưa có
-#   - Pull model deepseek-coder-v2:16b
+#   - vscode-extension/out/           Extension compiled
 #
 # Usage: chmod +x env_setup.sh && ./env_setup.sh
 ###############################################################################
 
-# Giữ terminal mở khi có lỗi
-trap 'echo ""; echo "⚠️  Script gặp lỗi. Nhấn Enter để đóng."; read' ERR
+# ============================================================
+# ERROR HANDLERS
+# ============================================================
+error_network() {
+    echo ""
+    echo "[LỖI] Yêu cầu mạng thất bại."
+    echo "Kiểm tra kết nối internet và thử lại."
+    read -p "Nhấn Enter để đóng..."
+    exit 1
+}
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-VENV_DIR="$SCRIPT_DIR/.venv"
-EXT_DIR="$SCRIPT_DIR/vscode-extension"
+error_extract() {
+    echo ""
+    echo "[LỖI] Không thể giải nén hoặc tạo Python venv."
+    echo "Đảm bảo đã cài: sudo apt install python3 python3-pip python3-venv"
+    read -p "Nhấn Enter để đóng..."
+    exit 1
+}
+
+error_pip() {
+    echo ""
+    echo "[LỖI] Cài đặt pip hoặc packages thất bại."
+    read -p "Nhấn Enter để đóng..."
+    exit 1
+}
+
+error_ollama_install() {
+    echo ""
+    echo "[LỖI] Cài đặt Ollama thất bại."
+    read -p "Nhấn Enter để đóng..."
+    exit 1
+}
+
+error_model() {
+    echo ""
+    echo "[LỖI] Tải model thất bại."
+    read -p "Nhấn Enter để đóng..."
+    exit 1
+}
+
+error_general() {
+    echo ""
+    echo "[LỖI] Đã xảy ra lỗi không mong đợi."
+    read -p "Nhấn Enter để đóng..."
+    exit 1
+}
+
+# ============================================================
+# CONFIGURATION
+# ============================================================
+SCRIPTROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# System Python (dùng để tạo venv)
+SYSTEM_PYTHON=$(which python3)
+if [ -z "$SYSTEM_PYTHON" ]; then
+    echo "[LỖI] Python3 không tìm thấy trên hệ thống!"
+    echo "Cài Python 3.10+: sudo apt install python3 python3-pip python3-venv"
+    error_general
+fi
+
+# Paths — tất cả nằm trong dự án
+VENV_DIR="${SCRIPTROOT}/python"
+PYTHON_EXE="${VENV_DIR}/bin/python3"
+EXT_DIR="${SCRIPTROOT}/vscode-extension"
+
+OLLAMA_DIR="${SCRIPTROOT}/ollama"
+OLLAMA_TAR="ollama-linux-amd64.tgz"
+OLLAMA_DOWNLOAD_URL="https://github.com/ollama/ollama/releases/download/v0.20.3/ollama-linux-amd64.tgz"
+OLLAMA_CHECKSUM_URL="https://github.com/ollama/ollama/releases/download/v0.20.3/sha256sum.txt"
+
+OLLAMA_BIN="${OLLAMA_DIR}/bin/ollama"
+OLLAMA_HOST="http://127.0.0.1:11435"
+OLLAMA_MODELS="${SCRIPTROOT}/models"
+
+export OLLAMA_HOST
+export OLLAMA_MODELS
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -27,178 +98,166 @@ info()  { echo -e "${GREEN}[✓]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[!]${NC} $1"; }
 err()   { echo -e "${RED}[✗]${NC} $1"; }
 
-# Lấy major version number từ string
-get_major_version() {
-    echo "$1" | grep -oP '\d+' | head -1
+echo ""
+echo "═══════════════════════════════════════════════════════"
+echo "  Agent Code — Cài đặt môi trường (Self-Contained)"
+echo "═══════════════════════════════════════════════════════"
+echo ""
+
+###############################################################################
+# 1. CREATE PYTHON VIRTUAL ENVIRONMENT
+###############################################################################
+echo "── [1/7] Python Virtual Environment ──"
+
+if [ -f "$PYTHON_EXE" ] && "$PYTHON_EXE" -m pip --version > /dev/null 2>&1; then
+    info "Python venv đã có tại python/. Bỏ qua."
+else
+    if [ -d "$VENV_DIR" ]; then
+        warn "Venv cũ bị lỗi (thiếu pip). Tạo lại..."
+        rm -rf "$VENV_DIR"
+    fi
+    echo "  → Tạo virtual environment bằng system Python ($SYSTEM_PYTHON)..."
+    "$SYSTEM_PYTHON" -m venv "$VENV_DIR" || error_extract
+    info "Virtual environment đã tạo."
+
+    # Đảm bảo pip có trong venv
+    if ! "$PYTHON_EXE" -m pip --version > /dev/null 2>&1; then
+        echo "  → pip chưa có trong venv, bootstrap với ensurepip..."
+        "$PYTHON_EXE" -m ensurepip --upgrade || error_pip
+    fi
+fi
+
+if [ ! -f "$PYTHON_EXE" ]; then
+    error_extract
+fi
+
+###############################################################################
+# 2. CONFIGURE ENVIRONMENT
+###############################################################################
+echo ""
+echo "── [2/7] Cấu hình Python ──"
+info "Python environment configured: $PYTHON_EXE"
+
+###############################################################################
+# 3. UPGRADE PIP
+###############################################################################
+echo ""
+echo "── [3/7] Nâng cấp pip ──"
+"$PYTHON_EXE" -m pip install --upgrade pip --no-warn-script-location --quiet || error_pip
+info "pip đã cập nhật"
+
+###############################################################################
+# 4. INSTALL AGENT-CODE CLI TOOL
+###############################################################################
+echo ""
+echo "── [4/7] Cài đặt agent-code CLI ──"
+
+echo "  → Cài agent-code từ pyproject.toml..."
+"$PYTHON_EXE" -m pip install -e "$SCRIPTROOT" --no-warn-script-location --quiet 2>/dev/null || {
+    warn "Cài lần đầu gặp lỗi, thử lại..."
+    "$PYTHON_EXE" -m pip install -e "$SCRIPTROOT" --no-warn-script-location 2>&1 | tail -5 || error_pip
 }
-
-echo ""
-echo "═══════════════════════════════════════════════════════"
-echo "  Agent Code — Cài đặt môi trường vào dự án"
-echo "═══════════════════════════════════════════════════════"
-echo ""
+info "CLI tool 'agent-code' đã cài"
 
 ###############################################################################
-# 1. Python
+# 5. DOWNLOAD OLLAMA (vào ollama/ trong dự án)
 ###############################################################################
-echo "── [1/7] Python ──"
-if command -v python3 &>/dev/null; then
-    info "Python đã có: $(python3 --version 2>&1)"
+echo ""
+echo "── [5/7] Tải Ollama (local) ──"
+
+if [ -f "$OLLAMA_BIN" ]; then
+    info "Ollama đã có tại ollama/bin/ollama. Bỏ qua."
 else
-    warn "Python3 chưa có. Đang cài..."
-    if command -v apt-get &>/dev/null; then
-        sudo apt-get update -qq && sudo apt-get install -y python3 python3-pip python3-venv
-    elif command -v dnf &>/dev/null; then
-        sudo dnf install -y python3 python3-pip
-    elif command -v pacman &>/dev/null; then
-        sudo pacman -S --noconfirm python python-pip
-    else
-        err "Không nhận diện package manager. Cài Python 3.10+ thủ công."
-        echo "Nhấn Enter để tiếp tục..."; read
-    fi
-    if command -v python3 &>/dev/null; then
-        info "Python đã cài: $(python3 --version 2>&1)"
-    fi
-fi
+    cd "$SCRIPTROOT"
 
-# Đảm bảo python3-venv đã cài (cần cho bước 5)
-if ! python3 -c "import venv" 2>/dev/null; then
-    warn "python3-venv chưa cài. Đang cài..."
-    if command -v apt-get &>/dev/null; then
-        sudo apt-get install -y python3-venv
+    # Tải checksum
+    echo "  → Tải checksums..."
+    wget -q --show-progress -O sha256sum.txt "$OLLAMA_CHECKSUM_URL" || error_network
+
+    # Lấy expected hash
+    EXPECTED_HASH=$(grep "$OLLAMA_TAR" sha256sum.txt | awk '{print $1}')
+
+    # Kiểm tra file .tgz cũ nếu có
+    if [ -f "$OLLAMA_TAR" ]; then
+        if [ -n "$EXPECTED_HASH" ]; then
+            echo "  → Tìm thấy ${OLLAMA_TAR}. Kiểm tra checksum..."
+            FILE_HASH=$(sha256sum "$OLLAMA_TAR" | awk '{print $1}')
+            if [ "$FILE_HASH" != "$EXPECTED_HASH" ]; then
+                echo "  → Checksum không khớp, xóa file cũ..."
+                rm -f "$OLLAMA_TAR"
+            else
+                echo "  → Checksum OK."
+            fi
+        fi
     fi
+
+    # Tải nếu chưa có
+    if [ ! -f "$OLLAMA_TAR" ]; then
+        echo "  → Đang tải ${OLLAMA_TAR}..."
+        wget -q --show-progress -O "$OLLAMA_TAR" "$OLLAMA_DOWNLOAD_URL" || error_network
+
+        # Verify
+        if [ -n "$EXPECTED_HASH" ]; then
+            FILE_HASH=$(sha256sum "$OLLAMA_TAR" | awk '{print $1}')
+            if [ "$FILE_HASH" != "$EXPECTED_HASH" ]; then
+                err "Checksum file tải về không khớp!"
+                rm -f "$OLLAMA_TAR"
+                error_network
+            fi
+        fi
+    fi
+
+    # Dọn checksum
+    rm -f sha256sum.txt
+
+    # Giải nén vào ollama/
+    echo "  → Giải nén vào ollama/..."
+    mkdir -p "$OLLAMA_DIR"
+    tar -xzf "$OLLAMA_TAR" -C "$OLLAMA_DIR" --strip-components=0 || error_ollama_install
+
+    # Verify binary
+    if [ -f "$OLLAMA_BIN" ]; then
+        chmod +x "$OLLAMA_BIN"
+        info "Ollama đã cài tại: ollama/bin/ollama"
+    else
+        # Thử tìm binary nếu cấu trúc khác
+        FOUND_BIN=$(find "$OLLAMA_DIR" -name "ollama" -type f 2>/dev/null | head -1)
+        if [ -n "$FOUND_BIN" ]; then
+            mkdir -p "${OLLAMA_DIR}/bin"
+            mv "$FOUND_BIN" "$OLLAMA_BIN"
+            chmod +x "$OLLAMA_BIN"
+            info "Ollama đã cài tại: ollama/bin/ollama"
+        else
+            err "Không tìm thấy binary ollama sau giải nén!"
+            error_ollama_install
+        fi
+    fi
+
+    # Dọn file .tgz
+    rm -f "$OLLAMA_TAR"
 fi
 
 ###############################################################################
-# 2. Node.js (YÊU CẦU v18+)
+# 6. NODE MODULES + COMPILE EXTENSION
 ###############################################################################
 echo ""
-echo "── [2/7] Node.js (cần v18+) ──"
+echo "── [6/7] Cài Node modules + compile extension ──"
 
-NEED_NODE_INSTALL=false
-
-if command -v node &>/dev/null; then
+# Check Node.js
+if ! command -v node &>/dev/null; then
+    err "Node.js chưa cài! Cần Node.js 18+."
+    echo "  Cài: https://nodejs.org hoặc: curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - && sudo apt-get install -y nodejs"
+    read -p "Nhấn Enter để tiếp tục..."
+else
     NODE_VERSION=$(node --version 2>&1)
-    NODE_MAJOR=$(get_major_version "$NODE_VERSION")
-    
+    NODE_MAJOR=$(echo "$NODE_VERSION" | grep -oP '\d+' | head -1)
     if [ "$NODE_MAJOR" -lt 18 ] 2>/dev/null; then
-        warn "Node.js $NODE_VERSION quá cũ! TypeScript cần v18+. Đang nâng cấp..."
-        NEED_NODE_INSTALL=true
+        err "Node.js $NODE_VERSION quá cũ! Cần v18+."
+        read -p "Nhấn Enter để tiếp tục..."
     else
-        info "Node.js đã có: $NODE_VERSION"
-    fi
-else
-    warn "Node.js chưa có. Đang cài v20..."
-    NEED_NODE_INSTALL=true
-fi
-
-if [ "$NEED_NODE_INSTALL" = true ]; then
-    if command -v apt-get &>/dev/null; then
-        echo "  → Xóa Node.js cũ + packages conflict..."
-        sudo apt-get remove -y nodejs npm libnode-dev nodejs-doc libnode72 2>/dev/null || true
-        sudo apt-get autoremove -y 2>/dev/null || true
-        
-        echo "  → Cài Node.js 20 từ NodeSource..."
-        curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-        sudo apt-get install -y nodejs
-    elif command -v dnf &>/dev/null; then
-        curl -fsSL https://rpm.nodesource.com/setup_20.x | sudo bash -
-        sudo dnf install -y nodejs
-    else
-        err "Cài Node.js 18+ thủ công: https://nodejs.org"
-        echo "Nhấn Enter để tiếp tục..."; read
-    fi
-    
-    if command -v node &>/dev/null; then
-        info "Node.js đã nâng cấp: $(node --version 2>&1)"
-    else
-        err "Không cài được Node.js"
+        info "Node.js: $NODE_VERSION"
     fi
 fi
-
-###############################################################################
-# 3. Git
-###############################################################################
-echo ""
-echo "── [3/7] Git ──"
-if command -v git &>/dev/null; then
-    info "Git đã có: $(git --version 2>&1)"
-else
-    warn "Git chưa có. Đang cài..."
-    if command -v apt-get &>/dev/null; then
-        sudo apt-get install -y git
-    elif command -v dnf &>/dev/null; then
-        sudo dnf install -y git
-    elif command -v pacman &>/dev/null; then
-        sudo pacman -S --noconfirm git
-    fi
-    if command -v git &>/dev/null; then
-        info "Git đã cài: $(git --version 2>&1)"
-    else
-        err "Không cài được Git"
-    fi
-fi
-
-###############################################################################
-# 4. Ollama
-###############################################################################
-echo ""
-echo "── [4/7] Ollama ──"
-if command -v ollama &>/dev/null; then
-    info "Ollama đã có"
-else
-    warn "Ollama chưa có. Đang tải và cài..."
-    curl -fsSL https://ollama.com/install.sh | sh || {
-        err "Không cài được Ollama. Cài thủ công: https://ollama.com"
-        echo "Nhấn Enter để tiếp tục..."; read
-    }
-    if command -v ollama &>/dev/null; then
-        info "Ollama đã cài"
-    fi
-fi
-
-###############################################################################
-# 5. Python venv + CLI tool
-###############################################################################
-echo ""
-echo "── [5/7] Tạo Python venv ──"
-
-# Xóa venv cũ nếu bị lỗi
-if [ -d "$VENV_DIR" ] && [ ! -f "$VENV_DIR/bin/activate" ]; then
-    warn "Venv cũ bị lỗi, xóa và tạo lại..."
-    rm -rf "$VENV_DIR"
-fi
-
-if [ ! -d "$VENV_DIR" ]; then
-    echo "  → Tạo virtual environment..."
-    python3 -m venv "$VENV_DIR" || {
-        err "Không tạo được venv."
-        echo "  Thử chạy: sudo apt install python3-venv"
-        echo "Nhấn Enter để tiếp tục..."; read
-    }
-fi
-
-if [ -f "$VENV_DIR/bin/activate" ]; then
-    source "$VENV_DIR/bin/activate"
-    info "Venv activated: $VENV_DIR"
-
-    pip install --upgrade pip --quiet 2>/dev/null
-
-    echo "  → Cài agent-code CLI tool..."
-    pip install -e "$SCRIPT_DIR" --quiet 2>/dev/null || {
-        warn "Cài CLI tool gặp lỗi, thử lại..."
-        pip install -e "$SCRIPT_DIR" 2>&1 | tail -5
-    }
-    info "CLI tool 'agent-code' đã cài"
-else
-    err "Không tìm thấy venv. Thử chạy: sudo apt install python3.10-venv"
-fi
-
-###############################################################################
-# 6. Node modules + compile extension
-###############################################################################
-echo ""
-echo "── [6/7] Cài Node modules + compile ──"
 
 if [ -d "$EXT_DIR" ]; then
     cd "$EXT_DIR"
@@ -206,16 +265,15 @@ if [ -d "$EXT_DIR" ]; then
     echo "  → npm install..."
     npm install 2>&1 | tail -3 || {
         err "npm install thất bại"
-        echo "Nhấn Enter để tiếp tục..."; read
+        read -p "Nhấn Enter để tiếp tục..."
     }
     info "node_modules đã cài"
 
     echo "  → Compile TypeScript..."
     npx tsc -p ./ 2>&1 || {
         err "TypeScript compile thất bại"
-        echo "  Kiểm tra Node.js version: $(node --version 2>&1)"
-        echo "  Cần Node.js 18+!"
-        echo "Nhấn Enter để tiếp tục..."; read
+        echo "  Node.js version: $(node --version 2>&1)"
+        read -p "Nhấn Enter để tiếp tục..."
     }
     info "Extension compiled"
 else
@@ -223,37 +281,56 @@ else
 fi
 
 ###############################################################################
-# 7. Pull model
+# 7. PULL MODEL (dùng Ollama local, lưu vào models/)
 ###############################################################################
 echo ""
 echo "── [7/7] Tải model DeepSeek-Coder-v2:16b ──"
 
-if command -v ollama &>/dev/null; then
-    if ! curl -s --max-time 3 http://localhost:11434/api/tags &>/dev/null; then
-        echo "  → Khởi động Ollama server..."
-        nohup ollama serve &>/dev/null &
-        sleep 4
+if [ -f "$OLLAMA_BIN" ]; then
+    # Tạo thư mục models
+    mkdir -p "$OLLAMA_MODELS"
+
+    # Dừng Ollama hệ thống nếu đang chạy trên cùng port
+    if curl -s --max-time 2 "$OLLAMA_HOST/api/tags" &>/dev/null; then
+        warn "Có Ollama đang chạy trên ${OLLAMA_HOST}, sẽ dùng instance mới..."
     fi
 
-    if curl -s --max-time 3 http://localhost:11434/api/tags &>/dev/null; then
-        if ollama list 2>/dev/null | grep -q "deepseek-coder-v2:16b"; then
-            info "Model đã có sẵn"
+    # Khởi động Ollama local
+    echo "  → Khởi động Ollama local (port 11435)..."
+    OLLAMA_HOST="$OLLAMA_HOST" OLLAMA_MODELS="$OLLAMA_MODELS" "$OLLAMA_BIN" serve &>/dev/null &
+    LOCAL_OLLAMA_PID=$!
+    sleep 4
+
+    if curl -s --max-time 3 "$OLLAMA_HOST/api/tags" &>/dev/null; then
+        info "Ollama local đã start (PID: $LOCAL_OLLAMA_PID)"
+
+        if OLLAMA_HOST="$OLLAMA_HOST" "$OLLAMA_BIN" list 2>/dev/null | grep -q "deepseek-coder-v2:16b"; then
+            info "Model đã có sẵn trong models/"
         else
             warn "Đang tải model (~10GB), vui lòng chờ..."
-            ollama pull deepseek-coder-v2:16b || {
-                err "Tải model thất bại. Thử lại: ollama pull deepseek-coder-v2:16b"
+            OLLAMA_HOST="$OLLAMA_HOST" OLLAMA_MODELS="$OLLAMA_MODELS" "$OLLAMA_BIN" pull deepseek-coder-v2:16b || {
+                err "Tải model thất bại. Thử lại sau."
+                kill $LOCAL_OLLAMA_PID 2>/dev/null
+                error_model
             }
+            info "Model đã tải xong vào models/"
         fi
+
+        # Dừng Ollama local sau khi pull xong
+        kill $LOCAL_OLLAMA_PID 2>/dev/null
+        wait $LOCAL_OLLAMA_PID 2>/dev/null
     else
-        err "Ollama server không khởi động được"
-        echo "  Thử chạy thủ công: ollama serve"
+        err "Ollama local không khởi động được"
+        kill $LOCAL_OLLAMA_PID 2>/dev/null
+        echo "  Kiểm tra lại file ollama/bin/ollama"
+        read -p "Nhấn Enter để tiếp tục..."
     fi
 else
     warn "Bỏ qua — Ollama chưa cài"
 fi
 
 ###############################################################################
-# Tổng kết
+# TỔNG KẾT
 ###############################################################################
 echo ""
 echo "═══════════════════════════════════════════════════════"
@@ -261,12 +338,15 @@ echo -e "  ${GREEN}✅ Cài đặt hoàn tất!${NC}"
 echo "═══════════════════════════════════════════════════════"
 echo ""
 echo "  Đã tạo trong dự án:"
-echo "    📁 .venv/                          Python venv"
+echo "    📁 python/                         Python venv"
+echo "    📁 ollama/bin/ollama               Ollama binary"
+echo "    📁 models/                         Model storage"
 echo "    📁 vscode-extension/node_modules/  Node deps"
 echo "    📁 vscode-extension/out/           Extension compiled"
 echo ""
-echo "  Python: $(python3 --version 2>&1)"
+echo "  Python: $($PYTHON_EXE --version 2>&1)"
 echo "  Node:   $(node --version 2>&1)"
+echo "  Ollama: $([ -f "$OLLAMA_BIN" ] && "$OLLAMA_BIN" --version 2>&1 || echo 'N/A')"
 echo ""
 echo "  Chạy ./run.sh để bắt đầu sử dụng."
 echo ""

@@ -15,7 +15,7 @@ export interface AgentCodeConfig {
 export function getConfig(): AgentCodeConfig {
     const cfg = vscode.workspace.getConfiguration('agentCode');
     return {
-        ollamaUrl: cfg.get<string>('ollamaUrl', 'http://localhost:11434'),
+        ollamaUrl: cfg.get<string>('ollamaUrl', 'http://127.0.0.1:11435'),
         model: cfg.get<string>('model', 'deepseek-coder-v2:16b'),
         inlineEnabled: cfg.get<boolean>('inlineEnabled', true),
         inlineDelay: cfg.get<number>('inlineDelay', 600),
