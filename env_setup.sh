@@ -78,9 +78,9 @@ PYTHON_EXE="${VENV_DIR}/bin/python3"
 EXT_DIR="${SCRIPTROOT}/vscode-extension"
 
 OLLAMA_DIR="${SCRIPTROOT}/ollama"
-OLLAMA_TAR="ollama-linux-amd64.tgz"
-OLLAMA_DOWNLOAD_URL="https://github.com/ollama/ollama/releases/download/v0.20.3/ollama-linux-amd64.tgz"
-OLLAMA_CHECKSUM_URL="https://github.com/ollama/ollama/releases/download/v0.20.3/sha256sum.txt"
+OLLAMA_TAR="ollama-linux-amd64.tar.zst"
+OLLAMA_DOWNLOAD_URL="https://github.com/ollama/ollama/releases/download/v0.20.7/ollama-linux-amd64.tar.zst"
+OLLAMA_CHECKSUM_URL="https://github.com/ollama/ollama/releases/download/v0.20.7/sha256sum.txt"
 
 OLLAMA_BIN="${OLLAMA_DIR}/bin/ollama"
 OLLAMA_HOST="http://127.0.0.1:11435"
@@ -170,6 +170,17 @@ if [ -f "$OLLAMA_BIN" ]; then
 else
     cd "$SCRIPTROOT"
 
+    # Kiểm tra zstd (cần để giải nén .tar.zst)
+    if ! command -v zstd &>/dev/null; then
+        warn "zstd chưa có. Đang cài..."
+        if command -v apt-get &>/dev/null; then
+            sudo apt-get install -y zstd || error_general
+        else
+            err "Cài zstd thủ công: sudo apt install zstd"
+            error_general
+        fi
+    fi
+
     # Tải checksum
     echo "  → Tải checksums..."
     wget -q --show-progress -O sha256sum.txt "$OLLAMA_CHECKSUM_URL" || error_network
@@ -177,7 +188,7 @@ else
     # Lấy expected hash
     EXPECTED_HASH=$(grep "$OLLAMA_TAR" sha256sum.txt | awk '{print $1}')
 
-    # Kiểm tra file .tgz cũ nếu có
+    # Kiểm tra file cũ nếu có
     if [ -f "$OLLAMA_TAR" ]; then
         if [ -n "$EXPECTED_HASH" ]; then
             echo "  → Tìm thấy ${OLLAMA_TAR}. Kiểm tra checksum..."
@@ -193,10 +204,20 @@ else
 
     # Tải nếu chưa có
     if [ ! -f "$OLLAMA_TAR" ]; then
-        echo "  → Đang tải ${OLLAMA_TAR}..."
-        wget -q --show-progress -O "$OLLAMA_TAR" "$OLLAMA_DOWNLOAD_URL" || error_network
+        echo "  → Đang tải ${OLLAMA_TAR} (~1.7GB)..."
+        wget -q --show-progress -O "$OLLAMA_TAR" "$OLLAMA_DOWNLOAD_URL" || {
+            rm -f "$OLLAMA_TAR"
+            error_network
+        }
 
-        # Verify
+        # Kiểm tra file không rỗng
+        if [ ! -s "$OLLAMA_TAR" ]; then
+            err "File tải về bị rỗng!"
+            rm -f "$OLLAMA_TAR"
+            error_network
+        fi
+
+        # Verify checksum
         if [ -n "$EXPECTED_HASH" ]; then
             FILE_HASH=$(sha256sum "$OLLAMA_TAR" | awk '{print $1}')
             if [ "$FILE_HASH" != "$EXPECTED_HASH" ]; then
@@ -210,10 +231,10 @@ else
     # Dọn checksum
     rm -f sha256sum.txt
 
-    # Giải nén vào ollama/
+    # Giải nén vào ollama/ (dùng zstd)
     echo "  → Giải nén vào ollama/..."
     mkdir -p "$OLLAMA_DIR"
-    tar -xzf "$OLLAMA_TAR" -C "$OLLAMA_DIR" --strip-components=0 || error_ollama_install
+    tar --zstd -xf "$OLLAMA_TAR" -C "$OLLAMA_DIR" || error_ollama_install
 
     # Verify binary
     if [ -f "$OLLAMA_BIN" ]; then
@@ -221,7 +242,7 @@ else
         info "Ollama đã cài tại: ollama/bin/ollama"
     else
         # Thử tìm binary nếu cấu trúc khác
-        FOUND_BIN=$(find "$OLLAMA_DIR" -name "ollama" -type f 2>/dev/null | head -1)
+        FOUND_BIN=$(find "$OLLAMA_DIR" -name "ollama" -type f -executable 2>/dev/null | head -1)
         if [ -n "$FOUND_BIN" ]; then
             mkdir -p "${OLLAMA_DIR}/bin"
             mv "$FOUND_BIN" "$OLLAMA_BIN"
