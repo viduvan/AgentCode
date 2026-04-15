@@ -19,7 +19,7 @@ For each issue found, use this format:
 - **[SEVERITY]** `filename:line` — Description of the issue
   - Suggestion: How to fix it
 
-Severity levels: 🔴 CRITICAL | 🟡 WARNING | 🔵 INFO
+Severity levels: CRITICAL | WARNING | INFO
 
 If no issues are found, say "Không tìm thấy vấn đề đáng kể."
 Do NOT rewrite the code — only report issues.

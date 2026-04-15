@@ -96,7 +96,7 @@ class AgentCodeLensProvider {
                     }));
                     // "Edit" lens
                     lenses.push(new vscode.CodeLens(range, {
-                        title: '✏️ Edit',
+                        title: 'Edit',
                         command: 'agent-code.editAtLine',
                         arguments: [document.uri, i],
                     }));

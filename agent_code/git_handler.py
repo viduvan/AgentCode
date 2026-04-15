@@ -104,7 +104,7 @@ class GitHandler:
 
             # Commit
             commit = self.repo.index.commit(
-                f"🤖 agent-code: {message}"
+                f"agent-code: {message}"
             )
             return str(commit.hexsha)[:8]
         except GitCommandError as exc:

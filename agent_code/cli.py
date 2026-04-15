@@ -23,7 +23,7 @@ from agent_code.scanner import ProjectScanner
 
 app = typer.Typer(
     name="agent-code",
-    help="🤖 AI-powered CLI coding assistant using local LLM (DeepSeek-Coder via Ollama)",
+    help="AI-powered CLI coding assistant using local LLM (DeepSeek-Coder via Ollama)",
     no_args_is_help=True,
 )
 console = Console()
@@ -51,7 +51,7 @@ def _display_diff(diff_text: str, filename: str) -> None:
         console.print(f"  [dim]No changes for {filename}[/dim]")
         return
     syntax = Syntax(diff_text, "diff", theme="monokai", line_numbers=False)
-    console.print(Panel(syntax, title=f"📝 {filename}", border_style="green"))
+    console.print(Panel(syntax, title=f" {filename}", border_style="green"))
 
 
 def _confirm_apply() -> bool:
@@ -95,7 +95,7 @@ def edit(
         "edit", instruction, context=context, tree=scan.tree_text,
     )
 
-    console.print(f"\n[bold]🧠 Asking LLM to: [cyan]{instruction}[/cyan][/bold]\n")
+    console.print(f"\n[bold] Asking LLM to: [cyan]{instruction}[/cyan][/bold]\n")
     try:
         response = client.generate(user_prompt, system=system_prompt)
     except LLMError as exc:
@@ -126,7 +126,7 @@ def edit(
             git = GitHandler(root)
             if git.is_git_repo():
                 branch = git.create_branch(instruction[:40])
-                console.print(f"[cyan]🌿 Created branch: {branch}[/cyan]")
+                console.print(f"[cyan] Created branch: {branch}[/cyan]")
         except GitError as exc:
             console.print(f"[yellow]⚠ Git: {exc}[/yellow]")
 
@@ -178,7 +178,7 @@ def explain(
         tree=scan.tree_text,
     )
 
-    console.print(f"\n[bold]🔍 Explaining: [cyan]{file}[/cyan][/bold]\n")
+    console.print(f"\n[bold] Explaining: [cyan]{file}[/cyan][/bold]\n")
     try:
         response = client.generate(user_prompt, system=system_prompt)
     except LLMError as exc:
@@ -186,7 +186,7 @@ def explain(
         raise typer.Exit(1)
 
     console.print("\n")
-    console.print(Panel(Markdown(response), title="📖 Explanation", border_style="blue"))
+    console.print(Panel(Markdown(response), title="Explanation", border_style="blue"))
 
 
 # =====================================================================
@@ -230,7 +230,7 @@ def review(
         raise typer.Exit(1)
 
     console.print("\n")
-    console.print(Panel(Markdown(response), title="📋 Code Review", border_style="yellow"))
+    console.print(Panel(Markdown(response), title=" Code Review", border_style="yellow"))
 
 
 # =====================================================================
@@ -260,7 +260,7 @@ def generate(
         "generate", instruction, context=context, tree=scan.tree_text,
     )
 
-    console.print(f"\n[bold]🚀 Generating: [cyan]{instruction}[/cyan][/bold]\n")
+    console.print(f"\n[bold]Generating: [cyan]{instruction}[/cyan][/bold]\n")
     try:
         response = client.generate(user_prompt, system=system_prompt)
     except LLMError as exc:
@@ -279,7 +279,7 @@ def generate(
     for change in changes:
         syntax = Syntax(change.new_content, change.filename.split(".")[-1] if "." in change.filename else "text",
                         theme="monokai", line_numbers=True)
-        console.print(Panel(syntax, title=f"📄 {change.filename}", border_style="green"))
+        console.print(Panel(syntax, title=f" {change.filename}", border_style="green"))
 
     if not _confirm_apply():
         console.print("[dim]Files not created.[/dim]")
@@ -291,7 +291,7 @@ def generate(
             git = GitHandler(root)
             if git.is_git_repo():
                 branch = git.create_branch(instruction[:40])
-                console.print(f"[cyan]🌿 Created branch: {branch}[/cyan]")
+                console.print(f"[cyan] Created branch: {branch}[/cyan]")
         except GitError as exc:
             console.print(f"[yellow]⚠ Git: {exc}[/yellow]")
 
@@ -339,7 +339,7 @@ def config(
         console.print("[green]✓ Configuration updated[/green]")
 
     if show or not changed:
-        table = Table(title="⚙️  Agent Code Configuration", border_style="cyan")
+        table = Table(title="Agent Code Configuration", border_style="cyan")
         table.add_column("Setting", style="bold")
         table.add_column("Value", style="cyan")
 

@@ -175,7 +175,7 @@ IMPORTANT: Your entire response MUST be in Vietnamese (tiếng Việt).`;
                 // Show result in a new untitled document
                 const doc = await vscode.workspace.openTextDocument({
                     language: 'markdown',
-                    content: `# 📖 Giải thích Code\n\n${result}`,
+                    content: `#  Giải thích Code\n\n${result}`,
                 });
                 await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
             }
@@ -207,7 +207,7 @@ class ReviewCommand {
         const system = `You are a code reviewer. Analyze code and report issues with this format:
 - **[SEVERITY]** \`filename:line\` — Description
   - Suggestion: How to fix
-Severity: 🔴 CRITICAL | 🟡 WARNING | 🔵 INFO
+Severity: CRITICAL | WARNING | INFO
 If no issues found, say "Không tìm thấy vấn đề đáng kể."
 Do NOT rewrite code — only report issues.
 IMPORTANT: Your entire response MUST be in Vietnamese (tiếng Việt).`;
@@ -226,7 +226,7 @@ IMPORTANT: Your entire response MUST be in Vietnamese (tiếng Việt).`;
                 });
                 const doc = await vscode.workspace.openTextDocument({
                     language: 'markdown',
-                    content: `# 📋 Đánh giá Code\n\n${result}`,
+                    content: `#  Đánh giá Code\n\n${result}`,
                 });
                 await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
             }
