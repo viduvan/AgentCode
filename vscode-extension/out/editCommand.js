@@ -70,7 +70,7 @@ class EditCommand {
         const selectedCode = editor.document.getText(selection);
         // Ask user for instruction
         const instruction = await vscode.window.showInputBox({
-            title: '🤖 Agent Code: Edit',
+            title: 'Agent Code: Edit',
             prompt: 'Describe what you want to change',
             placeHolder: 'e.g., add error handling, add logging, optimize performance',
         });
@@ -85,7 +85,7 @@ class EditCommand {
         let result;
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
-            title: `🤖 Agent Code: Editing...`,
+            title: `Agent Code: Editing...`,
             cancellable: true,
         }, async (progress, token) => {
             progress.report({ message: 'Sending to LLM...' });
@@ -161,7 +161,7 @@ Use headings and bullet points. Focus on what the code does, not how to improve 
 IMPORTANT: Your entire response MUST be in Vietnamese (tiếng Việt).`;
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
-            title: '🤖 Agent Code: Explaining...',
+            title: 'Agent Code: Explaining...',
             cancellable: true,
         }, async (progress, token) => {
             const abortController = new AbortController();
@@ -213,7 +213,7 @@ Do NOT rewrite code — only report issues.
 IMPORTANT: Your entire response MUST be in Vietnamese (tiếng Việt).`;
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
-            title: '🤖 Agent Code: Reviewing...',
+            title: 'Agent Code: Reviewing...',
             cancellable: true,
         }, async (progress, token) => {
             const abortController = new AbortController();
@@ -249,7 +249,7 @@ class GenerateCommand {
     }
     async execute() {
         const instruction = await vscode.window.showInputBox({
-            title: '🤖 Agent Code: Generate',
+            title: 'Agent Code: Generate',
             prompt: 'Describe what code to generate',
             placeHolder: 'e.g., Flask REST API with /users CRUD, pytest tests for auth module',
         });
@@ -262,7 +262,7 @@ Use proper language-specific conventions. Include docstrings/comments in Vietnam
 Do NOT include explanations outside the code block.`;
         await vscode.window.withProgress({
             location: vscode.ProgressLocation.Notification,
-            title: '🤖 Agent Code: Generating...',
+            title: 'Agent Code: Generating...',
             cancellable: true,
         }, async (progress, token) => {
             const abortController = new AbortController();
@@ -285,7 +285,7 @@ Do NOT include explanations outside the code block.`;
                     content: code,
                 });
                 await vscode.window.showTextDocument(doc);
-                vscode.window.showInformationMessage('🤖 Generated! Save the file with Ctrl+S to keep it.');
+                vscode.window.showInformationMessage('Generated! Save the file with Ctrl+S to keep it.');
             }
             catch (err) {
                 if (err.message !== 'Request aborted') {

@@ -1,5 +1,5 @@
 /**
- * CodeLens Provider — show "🤖 Explain | Edit" actions above functions/classes.
+ * CodeLens Provider — show " Explain | Edit" actions above functions/classes.
  */
 import * as vscode from 'vscode';
 
@@ -61,7 +61,7 @@ export class AgentCodeLensProvider implements vscode.CodeLensProvider {
 
                     // "Explain" lens
                     lenses.push(new vscode.CodeLens(range, {
-                        title: '🤖 Explain',
+                        title: 'Explain',
                         command: 'agent-code.explainAtLine',
                         arguments: [document.uri, i],
                     }));

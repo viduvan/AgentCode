@@ -80,9 +80,9 @@ class DiffManager {
             selection,
         };
         // Open diff view
-        await vscode.commands.executeCommand('vscode.diff', originalTempUri, modifiedTempUri, `🤖 Agent Code: ${baseName} (Review Changes)`, { preview: true });
+        await vscode.commands.executeCommand('vscode.diff', originalTempUri, modifiedTempUri, `Agent Code: ${baseName} (Review Changes)`, { preview: true });
         // Show accept/reject notification
-        const action = await vscode.window.showInformationMessage('🤖 Agent Code: Review the changes above', { modal: false }, '✅ Accept', '❌ Reject');
+        const action = await vscode.window.showInformationMessage('Agent Code: Review the changes above', { modal: false }, '✅ Accept', '❌ Reject');
         if (action === '✅ Accept') {
             await this.acceptEdit();
         }

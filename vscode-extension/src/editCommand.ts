@@ -19,7 +19,7 @@ export class EditCommand {
     constructor(
         private ollama: OllamaClient,
         private diffManager: DiffManager,
-    ) {}
+    ) { }
 
     /**
      * Execute the edit command: ask for instruction, call LLM, show diff.
@@ -42,7 +42,7 @@ export class EditCommand {
 
         // Ask user for instruction
         const instruction = await vscode.window.showInputBox({
-            title: '🤖 Agent Code: Edit',
+            title: 'Agent Code: Edit',
             prompt: 'Describe what you want to change',
             placeHolder: 'e.g., add error handling, add logging, optimize performance',
         });
@@ -62,7 +62,7 @@ export class EditCommand {
         await vscode.window.withProgress(
             {
                 location: vscode.ProgressLocation.Notification,
-                title: `🤖 Agent Code: Editing...`,
+                title: `Agent Code: Editing...`,
                 cancellable: true,
             },
             async (progress, token) => {
@@ -134,7 +134,7 @@ Return the complete modified code. Do not add any explanations.`;
  * Explain Command — explain selected code.
  */
 export class ExplainCommand {
-    constructor(private ollama: OllamaClient) {}
+    constructor(private ollama: OllamaClient) { }
 
     async execute(): Promise<void> {
         const editor = vscode.window.activeTextEditor;
@@ -157,7 +157,7 @@ IMPORTANT: Your entire response MUST be in Vietnamese (tiếng Việt).`;
         await vscode.window.withProgress(
             {
                 location: vscode.ProgressLocation.Notification,
-                title: '🤖 Agent Code: Explaining...',
+                title: 'Agent Code: Explaining...',
                 cancellable: true,
             },
             async (progress, token) => {
@@ -191,7 +191,7 @@ IMPORTANT: Your entire response MUST be in Vietnamese (tiếng Việt).`;
  * Review Command — review code for bugs and issues.
  */
 export class ReviewCommand {
-    constructor(private ollama: OllamaClient) {}
+    constructor(private ollama: OllamaClient) { }
 
     async execute(): Promise<void> {
         const editor = vscode.window.activeTextEditor;
@@ -214,7 +214,7 @@ IMPORTANT: Your entire response MUST be in Vietnamese (tiếng Việt).`;
         await vscode.window.withProgress(
             {
                 location: vscode.ProgressLocation.Notification,
-                title: '🤖 Agent Code: Reviewing...',
+                title: 'Agent Code: Reviewing...',
                 cancellable: true,
             },
             async (progress, token) => {
@@ -250,11 +250,11 @@ export class GenerateCommand {
     constructor(
         private ollama: OllamaClient,
         private diffManager: DiffManager,
-    ) {}
+    ) { }
 
     async execute(): Promise<void> {
         const instruction = await vscode.window.showInputBox({
-            title: '🤖 Agent Code: Generate',
+            title: 'Agent Code: Generate',
             prompt: 'Describe what code to generate',
             placeHolder: 'e.g., Flask REST API with /users CRUD, pytest tests for auth module',
         });
@@ -269,7 +269,7 @@ Do NOT include explanations outside the code block.`;
         await vscode.window.withProgress(
             {
                 location: vscode.ProgressLocation.Notification,
-                title: '🤖 Agent Code: Generating...',
+                title: 'Agent Code: Generating...',
                 cancellable: true,
             },
             async (progress, token) => {
@@ -296,7 +296,7 @@ Do NOT include explanations outside the code block.`;
                     await vscode.window.showTextDocument(doc);
 
                     vscode.window.showInformationMessage(
-                        '🤖 Generated! Save the file with Ctrl+S to keep it.',
+                        'Generated! Save the file with Ctrl+S to keep it.',
                     );
                 } catch (err: any) {
                     if (err.message !== 'Request aborted') {

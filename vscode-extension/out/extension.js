@@ -68,7 +68,7 @@ function activate(context) {
         const current = vscode.workspace.getConfiguration('agentCode').get('inlineEnabled', true);
         vscode.workspace.getConfiguration('agentCode').update('inlineEnabled', !current, true);
         inlineProvider.setEnabled(!current);
-        vscode.window.showInformationMessage(`🤖 Inline completions ${!current ? 'enabled' : 'disabled'}`);
+        vscode.window.showInformationMessage(`Inline completions ${!current ? 'enabled' : 'disabled'}`);
     }));
     // Focus chat panel
     context.subscriptions.push(vscode.commands.registerCommand('agent-code.chatFocus', () => {
@@ -124,7 +124,7 @@ function activate(context) {
         else {
             statusBar.text = '$(hubot) Agent Code ✗';
             statusBar.tooltip = 'Ollama not connected — click to open chat';
-            vscode.window.showWarningMessage('🤖 Agent Code: Cannot connect to Ollama. Make sure it is running (ollama serve).');
+            vscode.window.showWarningMessage('Agent Code: Cannot connect to Ollama. Make sure it is running (ollama serve).');
         }
     });
 }

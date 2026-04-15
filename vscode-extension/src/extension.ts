@@ -51,7 +51,7 @@ export function activate(context: vscode.ExtensionContext): void {
             vscode.workspace.getConfiguration('agentCode').update('inlineEnabled', !current, true);
             inlineProvider.setEnabled(!current);
             vscode.window.showInformationMessage(
-                `🤖 Inline completions ${!current ? 'enabled' : 'disabled'}`,
+                `Inline completions ${!current ? 'enabled' : 'disabled'}`,
             );
         }),
     );
@@ -146,7 +146,7 @@ export function activate(context: vscode.ExtensionContext): void {
             statusBar.text = '$(hubot) Agent Code ✗';
             statusBar.tooltip = 'Ollama not connected — click to open chat';
             vscode.window.showWarningMessage(
-                '🤖 Agent Code: Cannot connect to Ollama. Make sure it is running (ollama serve).',
+                'Agent Code: Cannot connect to Ollama. Make sure it is running (ollama serve).',
             );
         }
     });

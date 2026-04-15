@@ -1,14 +1,24 @@
 {
   "name": "agent-code",
   "displayName": "Agent Code",
-  "description": "🤖 AI-powered coding assistant using local LLM (DeepSeek-Coder via Ollama)",
+  "description": "AI-powered coding assistant using local LLM (DeepSeek-Coder via Ollama)",
   "version": "0.1.0",
   "publisher": "agent-code",
   "engines": {
     "vscode": "^1.85.0"
   },
-  "categories": ["Programming Languages", "Machine Learning", "Other"],
-  "keywords": ["ai", "copilot", "code-assistant", "ollama", "deepseek"],
+  "categories": [
+    "Programming Languages",
+    "Machine Learning",
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "copilot",
+    "code-assistant",
+    "ollama",
+    "deepseek"
+  ],
   "activationEvents": [
     "onStartupFinished"
   ],

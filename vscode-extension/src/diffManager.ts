@@ -72,13 +72,13 @@ export class DiffManager {
             'vscode.diff',
             originalTempUri,
             modifiedTempUri,
-            `🤖 Agent Code: ${baseName} (Review Changes)`,
+            `Agent Code: ${baseName} (Review Changes)`,
             { preview: true },
         );
 
         // Show accept/reject notification
         const action = await vscode.window.showInformationMessage(
-            '🤖 Agent Code: Review the changes above',
+            'Agent Code: Review the changes above',
             { modal: false },
             '✅ Accept',
             '❌ Reject',

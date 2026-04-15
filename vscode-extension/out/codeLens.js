@@ -35,7 +35,7 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.AgentCodeLensProvider = void 0;
 /**
- * CodeLens Provider — show "🤖 Explain | Edit" actions above functions/classes.
+ * CodeLens Provider — show " Explain | Edit" actions above functions/classes.
  */
 const vscode = __importStar(require("vscode"));
 /**
@@ -90,7 +90,7 @@ class AgentCodeLensProvider {
                     const range = new vscode.Range(i, 0, i, text.length);
                     // "Explain" lens
                     lenses.push(new vscode.CodeLens(range, {
-                        title: '🤖 Explain',
+                        title: 'Explain',
                         command: 'agent-code.explainAtLine',
                         arguments: [document.uri, i],
                     }));

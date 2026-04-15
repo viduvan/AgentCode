@@ -310,7 +310,7 @@ class ChatPanelProvider {
 </style>
 </head>
 <body>
-    <div id="chat-header">🤖 Agent Code Chat</div>
+    <div id="chat-header">Agent Code Chat</div>
 
     <div id="messages">
         <div class="message assistant">
