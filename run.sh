@@ -37,7 +37,7 @@ error() { echo -e "${RED}[✗]${NC} $1"; exit 1; }
 
 echo ""
 echo "═══════════════════════════════════════════════════"
-echo "  🤖 Agent Code — Khởi động (Self-Contained)"
+echo "  Agent Code — Khởi động (Self-Contained)"
 echo "═══════════════════════════════════════════════════"
 echo ""
 
