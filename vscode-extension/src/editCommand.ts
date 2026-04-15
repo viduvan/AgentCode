@@ -149,9 +149,10 @@ export class ExplainCommand {
             : editor.document.getText(selection);
 
         const lang = editor.document.languageId;
-        const prompt = `Explain the following ${lang} code clearly and concisely:\n\n${code}`;
+        const prompt = `Explain the following ${lang} code clearly and concisely. ALWAYS respond in Vietnamese (tiếng Việt):\n\n${code}`;
         const system = `You are a code explainer. Provide clear, structured explanations using markdown.
-Use headings and bullet points. Focus on what the code does, not how to improve it.`;
+Use headings and bullet points. Focus on what the code does, not how to improve it.
+IMPORTANT: Your entire response MUST be in Vietnamese (tiếng Việt).`;
 
         await vscode.window.withProgress(
             {
@@ -173,7 +174,7 @@ Use headings and bullet points. Focus on what the code does, not how to improve 
                     // Show result in a new untitled document
                     const doc = await vscode.workspace.openTextDocument({
                         language: 'markdown',
-                        content: `# 📖 Code Explanation\n\n${result}`,
+                        content: `# 📖 Giải thích Code\n\n${result}`,
                     });
                     await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
                 } catch (err: any) {
@@ -201,13 +202,14 @@ export class ReviewCommand {
 
         const context = ContextBuilder.fromDocument(editor.document);
         const lang = editor.document.languageId;
-        const prompt = `Review the following ${lang} code for bugs, security issues, and improvements:\n\n${context}`;
+        const prompt = `Review the following ${lang} code for bugs, security issues, and improvements. ALWAYS respond in Vietnamese (tiếng Việt):\n\n${context}`;
         const system = `You are a code reviewer. Analyze code and report issues with this format:
 - **[SEVERITY]** \`filename:line\` — Description
   - Suggestion: How to fix
 Severity: 🔴 CRITICAL | 🟡 WARNING | 🔵 INFO
-If no issues found, say "No significant issues found."
-Do NOT rewrite code — only report issues.`;
+If no issues found, say "Không tìm thấy vấn đề đáng kể."
+Do NOT rewrite code — only report issues.
+IMPORTANT: Your entire response MUST be in Vietnamese (tiếng Việt).`;
 
         await vscode.window.withProgress(
             {
@@ -228,7 +230,7 @@ Do NOT rewrite code — only report issues.`;
 
                     const doc = await vscode.workspace.openTextDocument({
                         language: 'markdown',
-                        content: `# 📋 Code Review\n\n${result}`,
+                        content: `# 📋 Đánh giá Code\n\n${result}`,
                     });
                     await vscode.window.showTextDocument(doc, vscode.ViewColumn.Beside);
                 } catch (err: any) {
@@ -261,7 +263,7 @@ export class GenerateCommand {
 
         const prompt = `Generate code based on this description:\n\n${instruction}\n\nReturn complete, working code. Include imports and proper structure.`;
         const system = `You are a code generator. Return ONLY code inside a single code block.
-Use proper language-specific conventions. Include docstrings/comments.
+Use proper language-specific conventions. Include docstrings/comments in Vietnamese.
 Do NOT include explanations outside the code block.`;
 
         await vscode.window.withProgress(

@@ -90,8 +90,8 @@ class ChatPanelProvider {
         let system = 'You are a helpful coding assistant. Answer concisely using markdown formatting.';
         let prompt = text;
         if (text.startsWith('/explain')) {
-            system = 'You are a code explainer. Explain the code clearly using markdown.';
-            prompt = text.replace('/explain', '').trim() || 'Explain the following code';
+            system = 'You are a code explainer. Explain the code clearly using markdown. ALWAYS respond in Vietnamese (tiếng Việt).';
+            prompt = text.replace('/explain', '').trim() || 'Explain the following code. Respond in Vietnamese';
             prompt += '\n\n' + context;
         }
         else if (text.startsWith('/review')) {

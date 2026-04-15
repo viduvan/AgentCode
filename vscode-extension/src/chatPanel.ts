@@ -74,8 +74,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         let prompt = text;
 
         if (text.startsWith('/explain')) {
-            system = 'You are a code explainer. Explain the code clearly using markdown.';
-            prompt = text.replace('/explain', '').trim() || 'Explain the following code';
+            system = 'You are a code explainer. Explain the code clearly using markdown. ALWAYS respond in Vietnamese (tiếng Việt).';
+            prompt = text.replace('/explain', '').trim() || 'Explain the following code. Respond in Vietnamese';
             prompt += '\n\n' + context;
         } else if (text.startsWith('/review')) {
             system = 'You are a code reviewer. Report issues with severity levels. Do not rewrite code.';
