@@ -1,7 +1,7 @@
 """Prompt template for the EXPLAIN action."""
 
 EXPLAIN_PROMPT = """## Task
-Explain the following code clearly and concisely.
+Explain the following code clearly and concisely. ALWAYS respond in Vietnamese.
 
 {project_context}
 
@@ -13,4 +13,5 @@ Explain the following code clearly and concisely.
 5. Use clear, simple language
 6. Structure your explanation with headings and bullet points
 7. Do NOT suggest changes — only explain what exists
+8. IMPORTANT: Your entire response MUST be in Vietnamese (tiếng Việt)
 """
