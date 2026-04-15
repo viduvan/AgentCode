@@ -1,7 +1,7 @@
 """Prompt template for the REVIEW action."""
 
 REVIEW_PROMPT = """## Task
-Review the following code for potential issues.
+Review the following code for potential issues. ALWAYS respond in Vietnamese.
 
 {project_context}
 
@@ -21,6 +21,7 @@ For each issue found, use this format:
 
 Severity levels: 🔴 CRITICAL | 🟡 WARNING | 🔵 INFO
 
-If no issues are found, say "No significant issues found."
+If no issues are found, say "Không tìm thấy vấn đề đáng kể."
 Do NOT rewrite the code — only report issues.
+IMPORTANT: Your entire response MUST be in Vietnamese (tiếng Việt).
 """
