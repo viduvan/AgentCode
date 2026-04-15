@@ -26,7 +26,7 @@ export function activate(context: vscode.ExtensionContext): void {
     const codeLensProvider = new AgentCodeLensProvider();
 
     // ── Chat Sidebar ──────────────────────────────────────────────
-    const chatProvider = new ChatPanelProvider(context.extensionUri, ollama);
+    const chatProvider = new ChatPanelProvider(context.extensionUri, ollama, diffManager, context.globalState);
     context.subscriptions.push(
         vscode.window.registerWebviewViewProvider(
             ChatPanelProvider.viewType,

@@ -59,7 +59,7 @@ function activate(context) {
     const inlineProvider = new inlineProvider_1.InlineCompletionProvider(ollama);
     const codeLensProvider = new codeLens_1.AgentCodeLensProvider();
     // ── Chat Sidebar ──────────────────────────────────────────────
-    const chatProvider = new chatPanel_1.ChatPanelProvider(context.extensionUri, ollama);
+    const chatProvider = new chatPanel_1.ChatPanelProvider(context.extensionUri, ollama, diffManager, context.globalState);
     context.subscriptions.push(vscode.window.registerWebviewViewProvider(chatPanel_1.ChatPanelProvider.viewType, chatProvider));
     // ── Commands ──────────────────────────────────────────────────
     context.subscriptions.push(vscode.commands.registerCommand('agent-code.edit', () => editCmd.execute()), vscode.commands.registerCommand('agent-code.explain', () => explainCmd.execute()), vscode.commands.registerCommand('agent-code.review', () => reviewCmd.execute()), vscode.commands.registerCommand('agent-code.generate', () => generateCmd.execute()), vscode.commands.registerCommand('agent-code.acceptEdit', () => diffManager.acceptEdit()), vscode.commands.registerCommand('agent-code.rejectEdit', () => diffManager.rejectEdit()));
