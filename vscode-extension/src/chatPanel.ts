@@ -227,6 +227,8 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
 
         let system = 'You are a helpful coding assistant. Answer concisely using markdown. When providing code, wrap it in markdown code blocks with the language specified.';
         let prompt = text;
+        let isGenerate = false;
+        let generateDesc = '';
 
         if (text.startsWith('/explain')) {
             system = 'You are a code explainer. Explain clearly using markdown. ALWAYS respond in Vietnamese.';
@@ -238,14 +240,16 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             system = 'You are a code editor. Return ONLY the modified code in a markdown code block. No explanations.';
             prompt = text.replace('/edit', '').trim() + '\n\nCode to edit:\n' + context;
         } else if (text.startsWith('/generate')) {
-            system = 'You are a code generator. Return complete code in a markdown code block. Add comments in Vietnamese.';
+            system = 'You are a code generator. Return complete code in a markdown code block with language specified. Add comments in Vietnamese.';
             const desc = text.replace('/generate', '').trim();
             if (!desc) {
-                const msg = 'Vui long mo ta code can tao. Vi du: /generate tao ham fibonacci';
+                const msg = 'Vui lòng mô tả code cần tạo. Ví dụ: /generate tạo hàm fibonacci bằng Python';
                 this.addMessageToStorage('assistant', msg);
                 this.postMessage({ type: 'assistantMessage', text: msg });
                 return;
             }
+            isGenerate = true;
+            generateDesc = desc;
             prompt = 'Generate code:\n\n' + desc;
             if (context) { prompt += '\n\nContext:\n' + context; }
         } else if (text.startsWith('/file')) {
@@ -272,6 +276,11 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             const fullText = collected.join('');
             this.addMessageToStorage('assistant', fullText);
             this.postMessage({ type: 'assistantMessage', text: fullText });
+
+            // Auto-create file for /generate
+            if (isGenerate) {
+                await this.handleGenerateResult(generateDesc, fullText);
+            }
         } catch (err: any) {
             const errText = 'Error: ' + err.message;
             this.addMessageToStorage('error', errText);
@@ -309,6 +318,53 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
             ? new vscode.Range(editor.document.positionAt(0), editor.document.positionAt(orig.length))
             : sel;
         await this.diffManager.showDiff(editor.document.uri, orig, code, range);
+    }
+
+    // ── Generate helpers ─────────────────────────────────────────
+
+    private extractCodeBlock(text: string): { code: string; language: string } {
+        const fenceRegex = /```(\w*)\n([\s\S]*?)```/;
+        const match = text.match(fenceRegex);
+        if (match) {
+            return { code: match[2].replace(/\n$/, ''), language: match[1] || '' };
+        }
+        // No code fence found — treat entire response as code
+        return { code: text.trim(), language: '' };
+    }
+
+    private inferFileName(description: string, language: string): string {
+        const extMap: Record<string, string> = {
+            python: '.py', javascript: '.js', typescript: '.ts', java: '.java',
+            go: '.go', rust: '.rs', html: '.html', css: '.css',
+            cpp: '.cpp', c: '.c', ruby: '.rb', php: '.php',
+            swift: '.swift', kotlin: '.kt', shell: '.sh', bash: '.sh',
+            sql: '.sql', json: '.json', yaml: '.yaml', xml: '.xml',
+        };
+
+        const ext = extMap[language.toLowerCase()] || '.txt';
+
+        // Try to extract a meaningful name from the description
+        // Remove Vietnamese diacritics and common words
+        const cleaned = description
+            .toLowerCase()
+            .replace(/tạo|tao|viết|viet|hàm|ham|lớp|lop|class|function|func|file|code|bằng|bang|sử dụng|su dung|với|voi|cho|và|va|một|mot|cái|cai|các|cac/gi, '')
+            .replace(/python|javascript|typescript|java|go|rust|html|css|c\+\+|ruby|php/gi, '')
+            .trim()
+            .replace(/[^a-z0-9\s]/g, '')
+            .replace(/\s+/g, '_')
+            .replace(/^_+|_+$/g, '')
+            .slice(0, 30);
+
+        const name = cleaned || 'generated_code';
+        return name + ext;
+    }
+
+    private async handleGenerateResult(description: string, fullText: string): Promise<void> {
+        const { code, language } = this.extractCodeBlock(fullText);
+        if (!code.trim()) { return; }
+
+        const fileName = this.inferFileName(description, language);
+        await this.diffManager.showNewFilePreview(code, fileName, language);
     }
 
     // ── HTML ─────────────────────────────────────────────────────
