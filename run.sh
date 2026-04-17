@@ -1,13 +1,13 @@
 #!/bin/bash
 ###############################################################################
-# run.sh — Khởi động Ollama local + mở VS Code với Agent Code extension
+# run.sh — Khởi động Agent Code — AI Coding Assistant chạy local
 #
 # Tự động:
 #   1. Activate Python venv (python/)
 #   2. Start Ollama local (ollama/bin/ollama)
-#   3. Check model (models/)
-#   4. Compile extension nếu cần
-#   5. Mở VS Code
+#   3. Check model deepseek-coder-v2:16b (models/)
+#   4. Compile VS Code extension nếu cần
+#   5. Mở VS Code → chat tự nhiên, agent tự hiểu intent
 #
 # Usage: ./run.sh
 ###############################################################################
@@ -128,16 +128,22 @@ echo ""
 echo -e "  ${CYAN}Trong VS Code:${NC}"
 echo "    1. Nhấn F5 → chạy Extension Development Host"
 echo "    2. Trong cửa sổ mới, mở project bạn muốn edit"
+echo "    3. Click icon Agent Code trên sidebar → mở Chat"
+echo ""
+echo -e "  ${CYAN}Chỉ cần chat tự nhiên — Agent tự hiểu:${NC}"
+echo "    💬 \"Xin chào\"               → Trả lời trực tiếp"
+echo "    📖 \"Giải thích hàm này\"      → Đọc code, giải thích"
+echo "    ✏️  \"Thêm error handling\"     → Sửa code, hiện diff"
+echo "    🔨 \"Tạo file server Express\" → Tạo file mới"
+echo "    🔎 \"Review file này\"         → Phân tích, báo bug"
+echo "    🧠 \"Xây dựng hệ thống auth\"  → Lập plan → Approve → Execute"
 echo ""
 echo -e "  ${CYAN}Phím tắt:${NC}"
-echo "    Ctrl+Shift+E  → Edit code (chọn code trước)"
-echo "    Ctrl+Shift+H  → Explain code"
-echo "    Ctrl+Shift+Y  → Accept changes"
-echo "    Ctrl+Shift+N  → Reject changes"
+echo "    Ctrl+Shift+Y  → Accept changes (diff)"
+echo "    Ctrl+Shift+N  → Reject changes (diff)"
 echo ""
 echo -e "  ${CYAN}CLI (terminal với venv đã activate):${NC}"
 echo "    agent-code edit \"add logging\" --file app.py"
-echo "    agent-code explain --file utils.py"
 echo "    agent-code review --file api.py"
 echo "    agent-code generate \"Flask server\""
 echo ""
