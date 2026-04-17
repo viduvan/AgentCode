@@ -180,6 +180,95 @@ export class DiffManager {
         await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
     }
 
+    /**
+     * Show a preview of newly generated code with Accept/Reject.
+     * Accept → showSaveDialog to save the file.
+     * Reject → discard and close preview.
+     */
+    async showNewFilePreview(
+        code: string,
+        suggestedFileName: string,
+        languageId: string,
+    ): Promise<void> {
+        // Clean up any previous pending edit
+        this.cleanup();
+
+        const timestamp = Date.now();
+        const tempPath = path.join(this.tempDir, `generated-${timestamp}-${suggestedFileName}`);
+        fs.writeFileSync(tempPath, code, 'utf-8');
+
+        const tempUri = vscode.Uri.file(tempPath);
+
+        // Store as pending so cleanup works
+        this.pendingEdit = {
+            originalUri: tempUri,
+            originalContent: '',
+            modifiedContent: code,
+            originalTempUri: tempUri,
+            modifiedTempUri: tempUri,
+        };
+
+        // Open preview
+        const doc = await vscode.workspace.openTextDocument(tempUri);
+        await vscode.window.showTextDocument(doc, { preview: true });
+
+        // Show accept/reject
+        const action = await vscode.window.showInformationMessage(
+            `Agent Code: File "${suggestedFileName}" đã được tạo. Lưu file?`,
+            { modal: false },
+            '✅ Accept',
+            '❌ Reject',
+        );
+
+        if (action === '✅ Accept') {
+            // Determine default save path
+            const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri;
+            const defaultUri = workspaceFolder
+                ? vscode.Uri.joinPath(workspaceFolder, suggestedFileName)
+                : vscode.Uri.file(path.join(os.homedir(), suggestedFileName));
+
+            const saveUri = await vscode.window.showSaveDialog({
+                defaultUri,
+                filters: this.getFileFilters(languageId),
+                title: 'Lưu file generated',
+            });
+
+            if (saveUri) {
+                fs.writeFileSync(saveUri.fsPath, code, 'utf-8');
+                await this.closeDiffTabs();
+                this.cleanup();
+
+                // Open the saved file
+                const savedDoc = await vscode.workspace.openTextDocument(saveUri);
+                await vscode.window.showTextDocument(savedDoc);
+                vscode.window.showInformationMessage(`✅ File đã lưu: ${path.basename(saveUri.fsPath)}`);
+            } else {
+                // User cancelled save dialog — keep preview open
+                vscode.window.showInformationMessage('Chưa lưu. File preview vẫn mở.');
+            }
+        } else {
+            await this.closeDiffTabs();
+            this.cleanup();
+            vscode.window.showInformationMessage('❌ Đã hủy, file không được lưu.');
+        }
+    }
+
+    private getFileFilters(languageId: string): Record<string, string[]> {
+        const filters: Record<string, Record<string, string[]>> = {
+            python: { 'Python': ['py'] },
+            javascript: { 'JavaScript': ['js'] },
+            typescript: { 'TypeScript': ['ts'] },
+            java: { 'Java': ['java'] },
+            go: { 'Go': ['go'] },
+            rust: { 'Rust': ['rs'] },
+            html: { 'HTML': ['html'] },
+            css: { 'CSS': ['css'] },
+            cpp: { 'C++': ['cpp', 'cc'] },
+            c: { 'C': ['c'] },
+        };
+        return filters[languageId] || { 'All Files': ['*'] };
+    }
+
     dispose(): void {
         this.cleanup();
     }
