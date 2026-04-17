@@ -38,12 +38,12 @@ exports.deactivate = deactivate;
 /**
  * Agent Code — VS Code Extension Entry Point
  *
- * Registers all providers, commands, and the sidebar chat panel.
+ * Registers the conversational AI agent, inline completion,
+ * CodeLens, and diff management.
  */
 const vscode = __importStar(require("vscode"));
 const ollama_1 = require("./ollama");
 const diffManager_1 = require("./diffManager");
-const editCommand_1 = require("./editCommand");
 const inlineProvider_1 = require("./inlineProvider");
 const codeLens_1 = require("./codeLens");
 const chatPanel_1 = require("./chatPanel");
@@ -52,17 +52,16 @@ function activate(context) {
     // ── Shared instances ──────────────────────────────────────────
     const ollama = new ollama_1.OllamaClient();
     const diffManager = new diffManager_1.DiffManager();
-    const editCmd = new editCommand_1.EditCommand(ollama, diffManager);
-    const explainCmd = new editCommand_1.ExplainCommand(ollama);
-    const reviewCmd = new editCommand_1.ReviewCommand(ollama);
-    const generateCmd = new editCommand_1.GenerateCommand(ollama, diffManager);
     const inlineProvider = new inlineProvider_1.InlineCompletionProvider(ollama);
     const codeLensProvider = new codeLens_1.AgentCodeLensProvider();
-    // ── Chat Sidebar ──────────────────────────────────────────────
+    // ── Chat Sidebar (powered by AgentWorkflow) ───────────────────
     const chatProvider = new chatPanel_1.ChatPanelProvider(context.extensionUri, ollama, diffManager, context.globalState);
     context.subscriptions.push(vscode.window.registerWebviewViewProvider(chatPanel_1.ChatPanelProvider.viewType, chatProvider));
-    // ── Commands ──────────────────────────────────────────────────
-    context.subscriptions.push(vscode.commands.registerCommand('agent-code.edit', () => editCmd.execute()), vscode.commands.registerCommand('agent-code.explain', () => explainCmd.execute()), vscode.commands.registerCommand('agent-code.review', () => reviewCmd.execute()), vscode.commands.registerCommand('agent-code.generate', () => generateCmd.execute()), vscode.commands.registerCommand('agent-code.acceptEdit', () => diffManager.acceptEdit()), vscode.commands.registerCommand('agent-code.rejectEdit', () => diffManager.rejectEdit()));
+    // ── Diff Accept/Reject Commands ───────────────────────────────
+    context.subscriptions.push(vscode.commands.registerCommand('agent-code.acceptEdit', () => diffManager.acceptEdit()), vscode.commands.registerCommand('agent-code.rejectEdit', () => diffManager.rejectEdit()));
+    // ── Plan Approve/Reject Commands ─────────────────────────────
+    const workflow = chatProvider.getWorkflow();
+    context.subscriptions.push(vscode.commands.registerCommand('agent-code.approvePlan', () => workflow.approvePlan()), vscode.commands.registerCommand('agent-code.rejectPlan', () => workflow.rejectPlan()));
     // Toggle inline completions
     context.subscriptions.push(vscode.commands.registerCommand('agent-code.toggleInline', () => {
         const current = vscode.workspace.getConfiguration('agentCode').get('inlineEnabled', true);
@@ -74,22 +73,32 @@ function activate(context) {
     context.subscriptions.push(vscode.commands.registerCommand('agent-code.chatFocus', () => {
         vscode.commands.executeCommand('agent-code.chatView.focus');
     }));
-    // ── CodeLens commands (triggered when clicking CodeLens) ──────
+    // ── CodeLens commands — route through workflow via chat ────────
     context.subscriptions.push(vscode.commands.registerCommand('agent-code.explainAtLine', async (uri, line) => {
         const doc = await vscode.workspace.openTextDocument(uri);
         const editor = await vscode.window.showTextDocument(doc);
-        // Select the function/class body (rough: select until next definition or end)
+        // Select the function/class body
         const endLine = findBlockEnd(doc, line);
         const range = new vscode.Range(line, 0, endLine, doc.lineAt(endLine).text.length);
         editor.selection = new vscode.Selection(range.start, range.end);
-        await explainCmd.execute();
+        // Send to workflow as a natural message
+        const funcName = doc.lineAt(line).text.trim();
+        await workflow.handleMessage(`Giải thích đoạn code: ${funcName}`);
     }), vscode.commands.registerCommand('agent-code.editAtLine', async (uri, line) => {
         const doc = await vscode.workspace.openTextDocument(uri);
         const editor = await vscode.window.showTextDocument(doc);
         const endLine = findBlockEnd(doc, line);
         const range = new vscode.Range(line, 0, endLine, doc.lineAt(endLine).text.length);
         editor.selection = new vscode.Selection(range.start, range.end);
-        await editCmd.execute();
+        // Ask user what to edit via input box, then send to workflow
+        const instruction = await vscode.window.showInputBox({
+            title: 'Agent Code: Edit',
+            prompt: 'Mô tả thay đổi cần thực hiện',
+            placeHolder: 'VD: thêm error handling, tối ưu hiệu suất...',
+        });
+        if (instruction) {
+            await workflow.handleMessage(instruction);
+        }
     }));
     // ── Inline Completion Provider ────────────────────────────────
     context.subscriptions.push(vscode.languages.registerInlineCompletionItemProvider({ pattern: '**' }, inlineProvider));
@@ -130,7 +139,6 @@ function activate(context) {
 }
 /**
  * Find the end line of a code block starting at `startLine`.
- * Simple heuristic: find next line at same or lower indentation.
  */
 function findBlockEnd(doc, startLine) {
     const startIndent = doc.lineAt(startLine).firstNonWhitespaceCharacterIndex;

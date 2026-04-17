@@ -35,25 +35,33 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ChatPanelProvider = void 0;
 /**
- * Chat Panel — Copilot-style sidebar webview with persistent chat history.
+ * Chat Panel — Conversational AI Agent sidebar.
+ *
+ * All user messages go through AgentWorkflow for automatic intent detection.
+ * No slash commands needed — just chat naturally.
  *
  * Features:
  * - Conversation persistence via globalState
  * - Multi-conversation support (new, switch, delete)
  * - Markdown rendering, code blocks with Copy/Insert/Apply
- * - Slash commands: /edit, /explain, /review, /generate, /file
+ * - Plan preview with Approve/Reject buttons
+ * - Task progress indicators
  */
 const vscode = __importStar(require("vscode"));
 const crypto = __importStar(require("crypto"));
-const contextBuilder_1 = require("./contextBuilder");
+const diffManager_1 = require("./diffManager");
+const agentWorkflow_1 = require("./agentWorkflow");
 const STORAGE_KEY = 'agentCode.conversations';
 const ACTIVE_KEY = 'agentCode.activeConversation';
 class ChatPanelProvider {
     constructor(extensionUri, ollama, diffManager, globalState) {
         this.extensionUri = extensionUri;
-        this.ollama = ollama;
-        this.diffManager = diffManager;
+        this.workflow = new agentWorkflow_1.AgentWorkflow(ollama, diffManager);
         this.globalState = globalState;
+    }
+    /** Expose workflow for extension.ts to register commands. */
+    getWorkflow() {
+        return this.workflow;
     }
     // ── Conversation Storage ─────────────────────────────────────
     getConversations() {
@@ -85,7 +93,6 @@ class ChatPanelProvider {
         const active = convos.find(c => c.id === this.getActiveId());
         if (active) {
             active.messages.push({ role, text });
-            // Auto-title from first user message
             if (role === 'user' && active.title === 'New Chat') {
                 active.title = text.slice(0, 40) + (text.length > 40 ? '...' : '');
             }
@@ -98,6 +105,8 @@ class ChatPanelProvider {
         webviewView.webview.options = { enableScripts: true };
         const nonce = crypto.randomBytes(16).toString('base64');
         webviewView.webview.html = this.getHtml(nonce);
+        // Connect workflow callbacks to webview
+        this.setupWorkflowCallbacks();
         // Handle messages from webview
         webviewView.webview.onDidReceiveMessage(async (msg) => {
             console.log('[Agent Code] Received:', msg.type);
@@ -105,7 +114,7 @@ class ChatPanelProvider {
                 switch (msg.type) {
                     case 'chat':
                         this.addMessageToStorage('user', msg.text);
-                        await this.handleChat(msg.text);
+                        await this.workflow.handleMessage(msg.text);
                         break;
                     case 'insertCode':
                         await this.insertCodeToEditor(msg.code);
@@ -117,8 +126,11 @@ class ChatPanelProvider {
                         await vscode.env.clipboard.writeText(msg.code);
                         vscode.window.showInformationMessage('Code copied!');
                         break;
-                    case 'readFile':
-                        await this.sendFileContext();
+                    case 'approvePlan':
+                        this.workflow.approvePlan();
+                        break;
+                    case 'rejectPlan':
+                        this.workflow.rejectPlan();
                         break;
                     case 'newChat':
                         this.createNewChat();
@@ -143,6 +155,34 @@ class ChatPanelProvider {
                 this.postMessage({ type: 'thinking', show: false });
             }
         });
+    }
+    /**
+     * Wire up AgentWorkflow callbacks → webview messages.
+     */
+    setupWorkflowCallbacks() {
+        const callbacks = {
+            sendMessage: (role, text) => {
+                this.addMessageToStorage(role, text);
+                this.postMessage({ type: 'assistantMessage', text });
+            },
+            streamToken: (text) => {
+                this.postMessage({ type: 'streamToken', text });
+            },
+            setThinking: (show, label) => {
+                this.postMessage({ type: 'thinking', show, label });
+            },
+            showPlan: (plan) => {
+                this.postMessage({ type: 'showPlan', plan });
+            },
+            updateProgress: (stepIndex, total, description, status) => {
+                this.postMessage({ type: 'taskProgress', stepIndex, total, description, status });
+            },
+            showResult: (success, message) => {
+                this.addMessageToStorage('assistant', message);
+                this.postMessage({ type: 'taskResult', success, text: message });
+            },
+        };
+        this.workflow.setCallbacks(callbacks);
     }
     postMessage(msg) {
         this.view?.webview.postMessage(msg);
@@ -195,94 +235,7 @@ class ChatPanelProvider {
             chats: convos.map(c => ({ id: c.id, title: c.title, active: c.id === activeId })),
         });
     }
-    // ── Chat logic ───────────────────────────────────────────────
-    async handleChat(text) {
-        console.log('[Agent Code] handleChat:', text);
-        // Build context (only for slash commands or selections)
-        const editor = vscode.window.activeTextEditor;
-        const needsContext = text.startsWith('/explain') || text.startsWith('/review') ||
-            text.startsWith('/edit') || text.startsWith('/generate') || text.startsWith('/file');
-        let context = '';
-        if (editor && needsContext) {
-            const selection = editor.selection;
-            context = selection.isEmpty
-                ? contextBuilder_1.ContextBuilder.fromDocument(editor.document)
-                : contextBuilder_1.ContextBuilder.fromSelection(editor);
-        }
-        else if (editor && !editor.selection.isEmpty) {
-            context = contextBuilder_1.ContextBuilder.fromSelection(editor);
-        }
-        let system = 'You are a helpful coding assistant. Answer concisely using markdown. When providing code, wrap it in markdown code blocks with the language specified.';
-        let prompt = text;
-        if (text.startsWith('/explain')) {
-            system = 'You are a code explainer. Explain clearly using markdown. ALWAYS respond in Vietnamese.';
-            prompt = (text.replace('/explain', '').trim() || 'Explain this code') + '\n\n' + context;
-        }
-        else if (text.startsWith('/review')) {
-            system = 'You are a code reviewer. Report issues with severity. Do not rewrite code. Respond in Vietnamese.';
-            prompt = (text.replace('/review', '').trim() || 'Review this code') + '\n\n' + context;
-        }
-        else if (text.startsWith('/edit')) {
-            system = 'You are a code editor. Return ONLY the modified code in a markdown code block. No explanations.';
-            prompt = text.replace('/edit', '').trim() + '\n\nCode to edit:\n' + context;
-        }
-        else if (text.startsWith('/generate')) {
-            system = 'You are a code generator. Return complete code in a markdown code block. Add comments in Vietnamese.';
-            const desc = text.replace('/generate', '').trim();
-            if (!desc) {
-                const msg = 'Vui long mo ta code can tao. Vi du: /generate tao ham fibonacci';
-                this.addMessageToStorage('assistant', msg);
-                this.postMessage({ type: 'assistantMessage', text: msg });
-                return;
-            }
-            prompt = 'Generate code:\n\n' + desc;
-            if (context) {
-                prompt += '\n\nContext:\n' + context;
-            }
-        }
-        else if (text.startsWith('/file')) {
-            await this.sendFileContext();
-            return;
-        }
-        else if (context) {
-            prompt = text + '\n\nSelected code:\n' + context;
-        }
-        this.postMessage({ type: 'thinking', show: true });
-        try {
-            const collected = [];
-            await this.ollama.generate({
-                prompt,
-                system,
-                onToken: (token) => {
-                    collected.push(token);
-                    if (collected.length % 3 === 0) {
-                        this.postMessage({ type: 'streamToken', text: collected.join('') });
-                    }
-                },
-            });
-            const fullText = collected.join('');
-            this.addMessageToStorage('assistant', fullText);
-            this.postMessage({ type: 'assistantMessage', text: fullText });
-        }
-        catch (err) {
-            const errText = 'Error: ' + err.message;
-            this.addMessageToStorage('error', errText);
-            this.postMessage({ type: 'error', text: errText });
-        }
-        this.postMessage({ type: 'thinking', show: false });
-    }
-    async sendFileContext() {
-        const editor = vscode.window.activeTextEditor;
-        if (!editor) {
-            this.postMessage({ type: 'assistantMessage', text: 'No file is open.' });
-            return;
-        }
-        const doc = editor.document;
-        const name = doc.fileName.split('/').pop() || doc.fileName;
-        const text = '**' + name + '** (' + doc.lineCount + ' lines, ' + doc.languageId + ')\n\n```' + doc.languageId + '\n' + doc.getText() + '\n```';
-        this.addMessageToStorage('assistant', text);
-        this.postMessage({ type: 'assistantMessage', text });
-    }
+    // ── Code actions ─────────────────────────────────────────────
     async insertCodeToEditor(code) {
         const editor = vscode.window.activeTextEditor;
         if (!editor) {
@@ -303,7 +256,8 @@ class ChatPanelProvider {
         const range = sel.isEmpty
             ? new vscode.Range(editor.document.positionAt(0), editor.document.positionAt(orig.length))
             : sel;
-        await this.diffManager.showDiff(editor.document.uri, orig, code, range);
+        const diffManager = new diffManager_1.DiffManager();
+        await diffManager.showDiff(editor.document.uri, orig, code, range);
     }
     // ── HTML ─────────────────────────────────────────────────────
     getHtml(nonce) {
@@ -345,6 +299,7 @@ class ChatPanelProvider {
             '.msg p { margin: 3px 0; } .msg ul,.msg ol { margin: 3px 0 3px 16px; } .msg li { margin: 1px 0; }\n' +
             '.msg strong { font-weight: 700; } .msg em { font-style: italic; }\n' +
             '.msg code:not(pre code) { background: var(--vscode-textCodeBlock-background); padding: 1px 4px; border-radius: 3px; font-family: var(--vscode-editor-font-family, monospace); font-size: 0.9em; }\n' +
+            // Code block wrapper
             '.cbw { margin: 6px 0; border-radius: 6px; overflow: hidden; border: 1px solid var(--vscode-panel-border); }\n' +
             '.cbh { display: flex; align-items: center; justify-content: space-between; padding: 3px 8px; background: var(--vscode-titleBar-activeBackground, rgba(255,255,255,0.05)); font-size: 10px; color: var(--vscode-descriptionForeground); border-bottom: 1px solid var(--vscode-panel-border); }\n' +
             '.cbl { font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }\n' +
@@ -353,13 +308,32 @@ class ChatPanelProvider {
             '.cba button:hover { background: var(--vscode-button-background); color: var(--vscode-button-foreground); opacity: 1; }\n' +
             '.cbw pre { background: var(--vscode-textCodeBlock-background); padding: 8px 10px; margin: 0; overflow-x: auto; font-family: var(--vscode-editor-font-family, monospace); font-size: 12px; line-height: 1.4; }\n' +
             '.cbw pre code { background: none; padding: 0; }\n' +
+            // Thinking indicator
             '#thinking { padding: 6px 12px; color: var(--vscode-descriptionForeground); display: none; align-items: center; gap: 6px; font-size: 11px; }\n' +
             '#thinking.show { display: flex; }\n' +
             '.dp { display: flex; gap: 3px; } .dp span { width: 5px; height: 5px; border-radius: 50%; background: var(--vscode-button-background); animation: p 1.2s ease-in-out infinite; }\n' +
             '.dp span:nth-child(2) { animation-delay: .15s; } .dp span:nth-child(3) { animation-delay: .3s; }\n' +
             '@keyframes p { 0%,80%,100% { transform: scale(.6); opacity: .4; } 40% { transform: scale(1); opacity: 1; } }\n' +
-            '.sh { padding: 5px 10px; color: var(--vscode-descriptionForeground); font-size: 10px; border-top: 1px solid var(--vscode-panel-border); display: flex; gap: 4px; flex-wrap: wrap; }\n' +
-            '.st { background: var(--vscode-badge-background); color: var(--vscode-badge-foreground); padding: 1px 5px; border-radius: 3px; font-family: var(--vscode-editor-font-family); font-size: 10px; cursor: pointer; }\n' +
+            // Plan card
+            '.plan-card { margin: 6px 0; border: 1px solid var(--vscode-panel-border); border-radius: 8px; overflow: hidden; background: var(--vscode-editor-background); }\n' +
+            '.plan-header { padding: 8px 12px; background: linear-gradient(135deg, #667eea22, #764ba222); border-bottom: 1px solid var(--vscode-panel-border); font-weight: 600; font-size: 12px; display: flex; align-items: center; gap: 6px; }\n' +
+            '.plan-steps { padding: 8px 12px; }\n' +
+            '.plan-step { padding: 4px 0; font-size: 12px; display: flex; align-items: center; gap: 6px; }\n' +
+            '.plan-step .step-icon { width: 18px; text-align: center; }\n' +
+            '.plan-step.done .step-icon { color: #4ec9b0; }\n' +
+            '.plan-step.running .step-icon { color: #dcdcaa; }\n' +
+            '.plan-step.failed .step-icon { color: #f44747; }\n' +
+            '.plan-actions { padding: 8px 12px; border-top: 1px solid var(--vscode-panel-border); display: flex; gap: 6px; }\n' +
+            '.plan-btn { padding: 4px 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 11px; font-weight: 600; }\n' +
+            '.plan-btn.approve { background: #4ec9b0; color: #1e1e1e; }\n' +
+            '.plan-btn.approve:hover { background: #3db89f; }\n' +
+            '.plan-btn.reject { background: var(--vscode-input-background); color: var(--vscode-foreground); border: 1px solid var(--vscode-panel-border); }\n' +
+            '.plan-btn.reject:hover { background: var(--vscode-inputValidation-errorBackground); }\n' +
+            // Result badge
+            '.result-badge { margin: 6px 0; padding: 8px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; }\n' +
+            '.result-badge.success { background: #4ec9b022; border: 1px solid #4ec9b044; color: #4ec9b0; }\n' +
+            '.result-badge.fail { background: #f4474722; border: 1px solid #f4474744; color: #f44747; }\n' +
+            // Input area
             '#ia { padding: 8px 8px 10px; border-top: 1px solid var(--vscode-panel-border); display: flex; gap: 5px; align-items: flex-end; }\n' +
             '#ia textarea { flex: 1; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border, transparent); border-radius: 6px; padding: 7px 10px; font-family: var(--vscode-font-family); font-size: var(--vscode-font-size, 13px); resize: none; outline: none; min-height: 34px; max-height: 120px; line-height: 1.4; }\n' +
             '#ia textarea:focus { border-color: var(--vscode-focusBorder); }\n' +
@@ -367,23 +341,18 @@ class ChatPanelProvider {
             '#sb:hover { background: var(--vscode-button-hoverBackground); }\n' +
             '#sb:disabled { opacity: .4; cursor: not-allowed; }\n' +
             '</style></head><body>\n' +
+            // Header
             '<div id="chat-header">\n' +
-            '  <span id="chat-title">New Chat</span>\n' +
+            '  <span id="chat-title">Agent Code</span>\n' +
             '  <button class="hdr-btn" id="btn-list" title="Conversations">&#9776;</button>\n' +
             '  <button class="hdr-btn" id="btn-new" title="New Chat">&#43;</button>\n' +
             '</div>\n' +
             '<div id="chat-list-panel"></div>\n' +
             '<div id="messages"></div>\n' +
-            '<div id="thinking"><div class="dp"><span></span><span></span><span></span></div> Thinking...</div>\n' +
-            '<div class="sh">\n' +
-            '  <span class="st" data-cmd="/edit ">/edit</span>\n' +
-            '  <span class="st" data-cmd="/explain ">/explain</span>\n' +
-            '  <span class="st" data-cmd="/review ">/review</span>\n' +
-            '  <span class="st" data-cmd="/generate ">/generate</span>\n' +
-            '  <span class="st" data-cmd="/file">/file</span>\n' +
-            '</div>\n' +
+            '<div id="thinking"><div class="dp"><span></span><span></span><span></span></div> <span id="think-label">Thinking...</span></div>\n' +
+            // Input area (no slash command hints — just chat naturally)
             '<div id="ia">\n' +
-            '  <textarea id="inp" rows="1" placeholder="Ask anything..."></textarea>\n' +
+            '  <textarea id="inp" rows="1" placeholder="Hỏi bất kỳ điều gì hoặc yêu cầu sửa code..."></textarea>\n' +
             '  <button id="sb" title="Send">&#8593;</button>\n' +
             '</div>\n' +
             '<script nonce="' + nonce + '">\n' +
@@ -392,6 +361,7 @@ class ChatPanelProvider {
             'var inp = document.getElementById("inp");\n' +
             'var sb = document.getElementById("sb");\n' +
             'var thk = document.getElementById("thinking");\n' +
+            'var thkLabel = document.getElementById("think-label");\n' +
             'var listPanel = document.getElementById("chat-list-panel");\n' +
             'var titleEl = document.getElementById("chat-title");\n' +
             'var sEl = null, busy = false;\n' +
@@ -400,20 +370,20 @@ class ChatPanelProvider {
             '\n' +
             'function md(text) {\n' +
             '  var cb = [];\n' +
-            '  var p = text.replace(/```(\\w*)\\n([\\s\\S]*?)```/g, function(m, l, c) { var i = cb.length; cb.push({l:l||"",c:c.replace(/\\n$/,"")}); return "%%C"+i+"%%"; });\n' +
+            '  var p = text.replace(/```(\\\\w*)\\\\n([\\\\s\\\\S]*?)```/g, function(m, l, c) { var i = cb.length; cb.push({l:l||"",c:c.replace(/\\\\n$/,"")}); return "%%C"+i+"%%"; });\n' +
             '  p = esc(p);\n' +
             '  p = p.replace(/^### (.+)$/gm,"<h3>$1</h3>");\n' +
             '  p = p.replace(/^## (.+)$/gm,"<h2>$1</h2>");\n' +
             '  p = p.replace(/^# (.+)$/gm,"<h1>$1</h1>");\n' +
-            '  p = p.replace(/\\*\\*([^*]+)\\*\\*/g,"<strong>$1</strong>");\n' +
-            '  p = p.replace(/\\*([^*]+)\\*/g,"<em>$1</em>");\n' +
+            '  p = p.replace(/\\\\*\\\\*([^*]+)\\\\*\\\\*/g,"<strong>$1</strong>");\n' +
+            '  p = p.replace(/\\\\*([^*]+)\\\\*/g,"<em>$1</em>");\n' +
             '  p = p.replace(/`([^`]+)`/g,"<code>$1</code>");\n' +
-            '  p = p.replace(/^[\\s]*[-] (.+)$/gm,"<li>$1</li>");\n' +
-            '  p = p.replace(/\\n\\n/g,"</p><p>");\n' +
-            '  p = p.replace(/\\n/g,"<br>");\n' +
+            '  p = p.replace(/^[\\\\s]*[-] (.+)$/gm,"<li>$1</li>");\n' +
+            '  p = p.replace(/\\\\n\\\\n/g,"</p><p>");\n' +
+            '  p = p.replace(/\\\\n/g,"<br>");\n' +
             '  p = "<p>" + p + "</p>";\n' +
-            '  p = p.replace(/<p><\\/p>/g,"");\n' +
-            '  p = p.replace(/%%C(\\d+)%%/g, function(m, i) {\n' +
+            '  p = p.replace(/<p><\\\\/p>/g,"");\n' +
+            '  p = p.replace(/%%C(\\\\d+)%%/g, function(m, i) {\n' +
             '    var b = cb[parseInt(i)]; var e = esc(b.c); var ll = b.l || "code";\n' +
             '    return \'<div class="cbw" data-lang="\'+ll+\'"><div class="cbh"><span class="cbl">\'+ll+\'</span><div class="cba"><button class="xc">Copy</button><button class="xi">Insert</button><button class="xa">Apply</button></div></div><pre><code>\'+e+\'</code></pre></div>\';\n' +
             '  });\n' +
@@ -434,14 +404,54 @@ class ChatPanelProvider {
             '  var w = document.createElement("div"); w.className = "mw assistant";\n' +
             '  var a = document.createElement("div"); a.className = "av b"; a.textContent = "A";\n' +
             '  var m = document.createElement("div"); m.className = "msg assistant";\n' +
-            '  m.innerHTML = "Xin ch\\u00e0o! T\\u00f4i l\\u00e0 <strong>Agent Code</strong> \\u2014 tr\\u1ee3 l\\u00ed AI assistant ch\\u1ea1y local.<br><br>" +\n' +
-            '    "T\\u00f4i c\\u00f3 th\\u1ec3 gi\\u00fap b\\u1ea1n:<br>" +\n' +
-            '    "\\u2022 Chat v\\u00e0 h\\u1ecfi v\\u1ec1 code<br>" +\n' +
-            '    "\\u2022 \\u0110\\u1ecdc file hi\\u1ec7n t\\u1ea1i (<code>/file</code>)<br>" +\n' +
-            '    "\\u2022 T\\u1ea1o code m\\u1edbi (<code>/generate</code>)<br>" +\n' +
-            '    "\\u2022 S\\u1eeda code v\\u00e0 apply (<code>/edit</code>)<br>" +\n' +
-            '    "\\u2022 Review code (<code>/review</code>)";\n' +
+            '  m.innerHTML = "Xin ch\\u00e0o! T\\u00f4i l\\u00e0 <strong>Agent Code</strong> \\u2014 AI assistant th\\u00f4ng minh ch\\u1ea1y local.<br><br>" +\n' +
+            '    "Ch\\u1ec9 c\\u1ea7n chat t\\u1ef1 nhi\\u00ean, t\\u00f4i s\\u1ebd t\\u1ef1 hi\\u1ec3u b\\u1ea1n c\\u1ea7n g\\u00ec:<br>" +\n' +
+            '    "\\u2022 <strong>H\\u1ecfi \\u0111\\u00e1p</strong> \\u2014 \\u201cGi\\u1ea3i th\\u00edch \\u0111o\\u1ea1n code n\\u00e0y\\u201d<br>" +\n' +
+            '    "\\u2022 <strong>S\\u1eeda code</strong> \\u2014 \\u201cTh\\u00eam error handling v\\u00e0o h\\u00e0m fetchData\\u201d<br>" +\n' +
+            '    "\\u2022 <strong>T\\u1ea1o code</strong> \\u2014 \\u201cT\\u1ea1o file server Express v\\u1edbi REST API\\u201d<br>" +\n' +
+            '    "\\u2022 <strong>Review</strong> \\u2014 \\u201cKi\\u1ec3m tra file n\\u00e0y c\\u00f3 bug kh\\u00f4ng\\u201d<br>" +\n' +
+            '    "\\u2022 <strong>L\\u1eadp k\\u1ebf ho\\u1ea1ch</strong> \\u2014 \\u201cX\\u00e2y d\\u1ef1ng h\\u1ec7 th\\u1ed1ng auth ho\\u00e0n ch\\u1ec9nh\\u201d";\n' +
             '  w.appendChild(a); w.appendChild(m); msgEl.appendChild(w);\n' +
+            '}\n' +
+            '\n' +
+            // Show plan card
+            'function showPlan(plan) {\n' +
+            '  var w = document.createElement("div"); w.className = "mw assistant";\n' +
+            '  var a = document.createElement("div"); a.className = "av b"; a.textContent = "A";\n' +
+            '  var card = document.createElement("div"); card.className = "plan-card";\n' +
+            '  var hdr = document.createElement("div"); hdr.className = "plan-header";\n' +
+            '  hdr.innerHTML = "\\ud83d\\udcdd " + esc(plan.title);\n' +
+            '  card.appendChild(hdr);\n' +
+            '  var stepsDiv = document.createElement("div"); stepsDiv.className = "plan-steps"; stepsDiv.id = "plan-steps";\n' +
+            '  plan.steps.forEach(function(s, i) {\n' +
+            '    var step = document.createElement("div"); step.className = "plan-step"; step.id = "plan-step-"+i;\n' +
+            '    step.innerHTML = \'<span class="step-icon">\\u25cb</span> <span>\\u0042\\u01b0\\u1edbc \' + (i+1) + \': \' + esc(s.description) + \' <em style="opacity:0.5">(\' + s.type + \': \' + esc(s.target||"") + \')</em></span>\';\n' +
+            '    stepsDiv.appendChild(step);\n' +
+            '  });\n' +
+            '  card.appendChild(stepsDiv);\n' +
+            '  var actions = document.createElement("div"); actions.className = "plan-actions";\n' +
+            '  actions.innerHTML = \'<button class="plan-btn approve" id="btn-approve">\\u2705 Approve</button><button class="plan-btn reject" id="btn-reject">\\u274c Reject</button>\';\n' +
+            '  card.appendChild(actions);\n' +
+            '  w.appendChild(a); w.appendChild(card); msgEl.appendChild(w);\n' +
+            '  msgEl.scrollTop = msgEl.scrollHeight;\n' +
+            '  document.getElementById("btn-approve").addEventListener("click", function() {\n' +
+            '    api.postMessage({type:"approvePlan"}); this.disabled = true; this.textContent = "Approved \\u2714";\n' +
+            '    document.getElementById("btn-reject").style.display = "none";\n' +
+            '  });\n' +
+            '  document.getElementById("btn-reject").addEventListener("click", function() {\n' +
+            '    api.postMessage({type:"rejectPlan"}); this.disabled = true; this.textContent = "Rejected";\n' +
+            '    document.getElementById("btn-approve").style.display = "none";\n' +
+            '  });\n' +
+            '}\n' +
+            '\n' +
+            // Update plan step status
+            'function updatePlanStep(index, status) {\n' +
+            '  var el = document.getElementById("plan-step-"+index); if(!el) return;\n' +
+            '  el.className = "plan-step " + status;\n' +
+            '  var icon = el.querySelector(".step-icon");\n' +
+            '  if(status==="running") icon.textContent = "\\u25d4";\n' +
+            '  else if(status==="done") icon.textContent = "\\u2714";\n' +
+            '  else if(status==="failed") icon.textContent = "\\u2718";\n' +
             '}\n' +
             '\n' +
             'function send() {\n' +
@@ -455,7 +465,6 @@ class ChatPanelProvider {
             'sb.addEventListener("click", function() { send(); });\n' +
             'inp.addEventListener("keydown", function(e) { if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();} });\n' +
             'inp.addEventListener("input", function() { inp.style.height="auto"; inp.style.height=Math.min(inp.scrollHeight,120)+"px"; });\n' +
-            'document.querySelector(".sh").addEventListener("click", function(e) { var t=e.target; if(t.classList&&t.classList.contains("st")){inp.value=t.getAttribute("data-cmd")||"";inp.focus();} });\n' +
             '\n' +
             '// Code block actions\n' +
             'msgEl.addEventListener("click", function(e) {\n' +
@@ -490,12 +499,16 @@ class ChatPanelProvider {
             '    case "streamToken":\n' +
             '      if(!sEl){var w=document.createElement("div");w.className="mw assistant";var a=document.createElement("div");a.className="av b";a.textContent="A";var d=document.createElement("div");d.className="msg assistant";w.appendChild(a);w.appendChild(d);msgEl.appendChild(w);sEl=d;}\n' +
             '      sEl.innerHTML=md(m.text); msgEl.scrollTop=msgEl.scrollHeight; break;\n' +
-            '    case "thinking": thk.className=m.show?"show":""; if(!m.show){busy=false;sb.disabled=false;} break;\n' +
+            '    case "thinking":\n' +
+            '      thk.className=m.show?"show":"";\n' +
+            '      if(m.label) thkLabel.textContent=m.label;\n' +
+            '      if(!m.show){busy=false;sb.disabled=false;}\n' +
+            '      break;\n' +
             '    case "error": addMsg("error",m.text); busy=false; sb.disabled=false; break;\n' +
-            '    case "clearMessages": msgEl.innerHTML=""; titleEl.textContent="New Chat"; showWelcome(); break;\n' +
+            '    case "clearMessages": msgEl.innerHTML=""; titleEl.textContent="Agent Code"; showWelcome(); break;\n' +
             '    case "restoreMessages":\n' +
             '      msgEl.innerHTML="";\n' +
-            '      titleEl.textContent=m.title||"Chat";\n' +
+            '      titleEl.textContent=m.title||"Agent Code";\n' +
             '      if(m.messages&&m.messages.length>0) m.messages.forEach(function(msg){addMsg(msg.role,msg.text);});\n' +
             '      else showWelcome();\n' +
             '      break;\n' +
@@ -506,6 +519,21 @@ class ChatPanelProvider {
             '        d.innerHTML=\'<span class="chat-item-title">\'+esc(c.title)+\'</span><button class="chat-item-del" data-id="\'+c.id+\'" title="Delete">&#10005;</button>\';\n' +
             '        listPanel.appendChild(d);\n' +
             '      });\n' +
+            '      break;\n' +
+            '    case "showPlan":\n' +
+            '      showPlan(m.plan);\n' +
+            '      break;\n' +
+            '    case "taskProgress":\n' +
+            '      updatePlanStep(m.stepIndex, m.status);\n' +
+            '      break;\n' +
+            '    case "taskResult":\n' +
+            '      var rb = document.createElement("div"); rb.className = "result-badge " + (m.success?"success":"fail");\n' +
+            '      rb.innerHTML = md(m.text);\n' +
+            '      var rw = document.createElement("div"); rw.className = "mw assistant";\n' +
+            '      var ra = document.createElement("div"); ra.className = "av b"; ra.textContent = "A";\n' +
+            '      rw.appendChild(ra); rw.appendChild(rb); msgEl.appendChild(rw);\n' +
+            '      msgEl.scrollTop = msgEl.scrollHeight;\n' +
+            '      busy=false; sb.disabled=false;\n' +
             '      break;\n' +
             '  }\n' +
             '});\n' +

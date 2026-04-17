@@ -35,18 +35,52 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.DiffManager = void 0;
 /**
- * Diff Manager — manages diff view with accept/reject for code edits.
+ * Diff Manager — manages diff view with accept/reject for code edits and generation.
  *
- * Flow:
- * 1. Original code is saved to a temp file
- * 2. Modified code is saved to another temp file
- * 3. vscode.diff opens both side-by-side
- * 4. User clicks Accept (write to real file) or Reject (discard)
+ * Features:
+ * - Uses vscode.diff for visual coloring (green = additions, red = deletions)
+ * - CodeLens buttons directly on the code editor for Accept/Reject
+ * - Supports both "edit" (modify existing) and "generate" (create new file) flows
  */
 const vscode = __importStar(require("vscode"));
 const path = __importStar(require("path"));
 const fs = __importStar(require("fs"));
 const os = __importStar(require("os"));
+// ── CodeLens Provider — shows Accept/Reject on the code surface ──
+class DiffActionCodeLensProvider {
+    constructor() {
+        this.pendingUri = null;
+        this.description = '';
+        this._onDidChangeCodeLenses = new vscode.EventEmitter();
+        this.onDidChangeCodeLenses = this._onDidChangeCodeLenses.event;
+    }
+    setPending(uri, description = '') {
+        this.pendingUri = uri;
+        this.description = description;
+        this._onDidChangeCodeLenses.fire();
+    }
+    provideCodeLenses(document) {
+        if (!this.pendingUri || document.uri.fsPath !== this.pendingUri.fsPath) {
+            return [];
+        }
+        const topLine = new vscode.Range(0, 0, 0, 0);
+        return [
+            new vscode.CodeLens(topLine, {
+                title: '$(file-diff) ' + this.description,
+                command: '',
+            }),
+            new vscode.CodeLens(topLine, {
+                title: '$(check) Accept',
+                command: 'agent-code.acceptEdit',
+            }),
+            new vscode.CodeLens(topLine, {
+                title: '$(x) Reject',
+                command: 'agent-code.rejectEdit',
+            }),
+        ];
+    }
+}
+// ── Diff Manager ─────────────────────────────────────────────────
 class DiffManager {
     constructor() {
         this.pendingEdit = null;
@@ -54,17 +88,14 @@ class DiffManager {
         if (!fs.existsSync(this.tempDir)) {
             fs.mkdirSync(this.tempDir, { recursive: true });
         }
+        this.codeLensProvider = new DiffActionCodeLensProvider();
+        this.codeLensDisposable = vscode.languages.registerCodeLensProvider({ pattern: '**' }, this.codeLensProvider);
     }
-    /**
-     * Show a diff between original and modified code.
-     * User can then Accept or Reject.
-     */
+    // ── Edit Flow ────────────────────────────────────────────────
     async showDiff(originalUri, originalContent, modifiedContent, selection) {
-        // Clean up previous pending edit
         this.cleanup();
         const baseName = path.basename(originalUri.fsPath);
         const timestamp = Date.now();
-        // Write temp files
         const originalTempPath = path.join(this.tempDir, `original-${timestamp}-${baseName}`);
         const modifiedTempPath = path.join(this.tempDir, `modified-${timestamp}-${baseName}`);
         fs.writeFileSync(originalTempPath, originalContent, 'utf-8');
@@ -72,6 +103,7 @@ class DiffManager {
         const originalTempUri = vscode.Uri.file(originalTempPath);
         const modifiedTempUri = vscode.Uri.file(modifiedTempPath);
         this.pendingEdit = {
+            type: 'edit',
             originalUri,
             originalContent,
             modifiedContent,
@@ -79,72 +111,100 @@ class DiffManager {
             modifiedTempUri,
             selection,
         };
-        // Open diff view
         await vscode.commands.executeCommand('vscode.diff', originalTempUri, modifiedTempUri, `Agent Code: ${baseName} (Review Changes)`, { preview: true });
-        // Show accept/reject notification
-        const action = await vscode.window.showInformationMessage('Agent Code: Review the changes above', { modal: false }, '✅ Accept', '❌ Reject');
-        if (action === '✅ Accept') {
-            await this.acceptEdit();
-        }
-        else {
-            await this.rejectEdit();
-        }
+        this.codeLensProvider.setPending(modifiedTempUri, `Review: ${baseName}`);
     }
-    /**
-     * Accept pending edit — write modified content to the real file.
-     */
+    // ── Generate Flow ────────────────────────────────────────────
+    async showNewFilePreview(code, suggestedFileName, languageId) {
+        this.cleanup();
+        const timestamp = Date.now();
+        const originalTempPath = path.join(this.tempDir, `empty-${timestamp}-${suggestedFileName}`);
+        const modifiedTempPath = path.join(this.tempDir, `generated-${timestamp}-${suggestedFileName}`);
+        fs.writeFileSync(originalTempPath, '', 'utf-8');
+        fs.writeFileSync(modifiedTempPath, code, 'utf-8');
+        const originalTempUri = vscode.Uri.file(originalTempPath);
+        const modifiedTempUri = vscode.Uri.file(modifiedTempPath);
+        this.pendingEdit = {
+            type: 'generate',
+            originalUri: modifiedTempUri,
+            originalContent: '',
+            modifiedContent: code,
+            originalTempUri,
+            modifiedTempUri,
+            suggestedFileName,
+            languageId,
+        };
+        await vscode.commands.executeCommand('vscode.diff', originalTempUri, modifiedTempUri, `Agent Code: ${suggestedFileName} (Generated — New File)`, { preview: true });
+        this.codeLensProvider.setPending(modifiedTempUri, `New file: ${suggestedFileName}`);
+    }
+    // ── Accept / Reject ──────────────────────────────────────────
     async acceptEdit() {
         if (!this.pendingEdit) {
             vscode.window.showWarningMessage('No pending Agent Code edit to accept.');
             return false;
         }
-        const { originalUri, modifiedContent, selection } = this.pendingEdit;
+        const pending = this.pendingEdit;
         try {
-            // If we have a selection, only replace that part
-            const editor = vscode.window.visibleTextEditors.find(e => e.document.uri.fsPath === originalUri.fsPath);
-            if (editor && selection) {
-                await editor.edit(editBuilder => {
-                    editBuilder.replace(selection, modifiedContent);
-                });
+            if (pending.type === 'generate') {
+                // Save directly to workspace folder — no dialog
+                const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri;
+                const fileName = pending.suggestedFileName || 'generated_code.txt';
+                const saveUri = workspaceFolder
+                    ? vscode.Uri.joinPath(workspaceFolder, fileName)
+                    : vscode.Uri.file(path.join(os.homedir(), fileName));
+                fs.writeFileSync(saveUri.fsPath, pending.modifiedContent, 'utf-8');
+                await this.closeDiffTabs();
+                this.codeLensProvider.setPending(null);
+                this.cleanup();
+                const savedDoc = await vscode.workspace.openTextDocument(saveUri);
+                await vscode.window.showTextDocument(savedDoc);
+                vscode.window.showInformationMessage(`File đã lưu: ${path.basename(saveUri.fsPath)}`);
+                return true;
             }
             else {
-                // Replace entire file
-                const doc = await vscode.workspace.openTextDocument(originalUri);
-                const fullRange = new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length));
-                const edit = new vscode.WorkspaceEdit();
-                edit.replace(originalUri, fullRange, modifiedContent);
-                await vscode.workspace.applyEdit(edit);
+                // Edit: apply changes to the original file
+                const { originalUri, modifiedContent, selection } = pending;
+                const editor = vscode.window.visibleTextEditors.find(e => e.document.uri.fsPath === originalUri.fsPath);
+                if (editor && selection) {
+                    await editor.edit(editBuilder => {
+                        editBuilder.replace(selection, modifiedContent);
+                    });
+                }
+                else {
+                    const doc = await vscode.workspace.openTextDocument(originalUri);
+                    const fullRange = new vscode.Range(doc.positionAt(0), doc.positionAt(doc.getText().length));
+                    const edit = new vscode.WorkspaceEdit();
+                    edit.replace(originalUri, fullRange, modifiedContent);
+                    await vscode.workspace.applyEdit(edit);
+                }
+                vscode.window.showInformationMessage('Agent Code: Changes applied!');
+                await this.closeDiffTabs();
+                this.codeLensProvider.setPending(null);
+                this.cleanup();
+                return true;
             }
-            vscode.window.showInformationMessage('✅ Agent Code: Changes applied!');
-            // Close diff tabs
-            await this.closeDiffTabs();
-            this.cleanup();
-            return true;
         }
         catch (err) {
             vscode.window.showErrorMessage(`Failed to apply changes: ${err.message}`);
+            this.codeLensProvider.setPending(null);
             this.cleanup();
             return false;
         }
     }
-    /**
-     * Reject pending edit — discard changes.
-     */
     async rejectEdit() {
         if (!this.pendingEdit) {
             vscode.window.showWarningMessage('No pending Agent Code edit to reject.');
             return;
         }
-        vscode.window.showInformationMessage('❌ Agent Code: Changes rejected.');
+        vscode.window.showInformationMessage('Agent Code: Changes rejected.');
         await this.closeDiffTabs();
+        this.codeLensProvider.setPending(null);
         this.cleanup();
     }
     hasPendingEdit() {
         return this.pendingEdit !== null;
     }
-    /**
-     * Clean up temp files.
-     */
+    // ── Internal helpers ─────────────────────────────────────────
     cleanup() {
         if (this.pendingEdit) {
             try {
@@ -163,14 +223,27 @@ class DiffManager {
             this.pendingEdit = null;
         }
     }
-    /**
-     * Close the diff editor tabs.
-     */
     async closeDiffTabs() {
-        // Close active diff tab
         await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
     }
+    getFileFilters(languageId) {
+        const filters = {
+            python: { 'Python': ['py'] },
+            javascript: { 'JavaScript': ['js'] },
+            typescript: { 'TypeScript': ['ts'] },
+            java: { 'Java': ['java'] },
+            go: { 'Go': ['go'] },
+            rust: { 'Rust': ['rs'] },
+            html: { 'HTML': ['html'] },
+            css: { 'CSS': ['css'] },
+            cpp: { 'C++': ['cpp', 'cc'] },
+            c: { 'C': ['c'] },
+        };
+        return filters[languageId] || { 'All Files': ['*'] };
+    }
     dispose() {
+        this.codeLensProvider.setPending(null);
+        this.codeLensDisposable.dispose();
         this.cleanup();
     }
 }

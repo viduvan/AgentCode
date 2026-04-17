@@ -1,8 +1,8 @@
 {
   "name": "agent-code",
   "displayName": "Agent Code",
-  "description": "AI-powered coding assistant using local LLM (DeepSeek-Coder via Ollama)",
-  "version": "0.1.0",
+  "description": "AI-powered conversational coding agent using local LLM (DeepSeek-Coder via Ollama)",
+  "version": "0.2.0",
   "publisher": "agent-code",
   "engines": {
     "vscode": "^1.85.0"
@@ -16,6 +16,7 @@
     "ai",
     "copilot",
     "code-assistant",
+    "agent",
     "ollama",
     "deepseek"
   ],
@@ -26,23 +27,6 @@
   "contributes": {
     "commands": [
       {
-        "command": "agent-code.edit",
-        "title": "Agent Code: Edit Selection",
-        "icon": "$(edit)"
-      },
-      {
-        "command": "agent-code.explain",
-        "title": "Agent Code: Explain Selection"
-      },
-      {
-        "command": "agent-code.review",
-        "title": "Agent Code: Review File"
-      },
-      {
-        "command": "agent-code.generate",
-        "title": "Agent Code: Generate Code"
-      },
-      {
         "command": "agent-code.acceptEdit",
         "title": "Agent Code: Accept Changes",
         "icon": "$(check)"
@@ -50,6 +34,16 @@
       {
         "command": "agent-code.rejectEdit",
         "title": "Agent Code: Reject Changes",
+        "icon": "$(close)"
+      },
+      {
+        "command": "agent-code.approvePlan",
+        "title": "Agent Code: Approve Plan",
+        "icon": "$(check)"
+      },
+      {
+        "command": "agent-code.rejectPlan",
+        "title": "Agent Code: Reject Plan",
         "icon": "$(close)"
       },
       {
@@ -63,18 +57,6 @@
     ],
     "keybindings": [
       {
-        "command": "agent-code.edit",
-        "key": "ctrl+shift+e",
-        "mac": "cmd+shift+e",
-        "when": "editorHasSelection"
-      },
-      {
-        "command": "agent-code.explain",
-        "key": "ctrl+shift+h",
-        "mac": "cmd+shift+h",
-        "when": "editorHasSelection"
-      },
-      {
         "command": "agent-code.acceptEdit",
         "key": "ctrl+shift+y",
         "mac": "cmd+shift+y"
@@ -85,24 +67,6 @@
         "mac": "cmd+shift+n"
       }
     ],
-    "menus": {
-      "editor/context": [
-        {
-          "command": "agent-code.edit",
-          "group": "agentCode@1",
-          "when": "editorHasSelection"
-        },
-        {
-          "command": "agent-code.explain",
-          "group": "agentCode@2",
-          "when": "editorHasSelection"
-        },
-        {
-          "command": "agent-code.review",
-          "group": "agentCode@3"
-        }
-      ]
-    },
     "viewsContainers": {
       "activitybar": [
         {
