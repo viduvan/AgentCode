@@ -132,23 +132,25 @@ export class DiffManager {
     private showActionButtons(description: string): void {
         this.hideActionButtons();
 
-        // Description label (centered via priority 0)
-        this.separatorBtn = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, -998);
-        this.separatorBtn.text = `$(file-diff) ${description}`;
+        // Description label — right side, visible
+        this.separatorBtn = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 1000);
+        this.separatorBtn.text = `$(file-diff) Agent Code: ${description}`;
         this.separatorBtn.tooltip = 'Agent Code: Pending changes';
+        this.separatorBtn.color = new vscode.ThemeColor('editorInfo.foreground');
         this.separatorBtn.show();
 
         // Accept button — green background
-        this.acceptBtn = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, -999);
-        this.acceptBtn.text = '$(check) Accept';
+        this.acceptBtn = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 999);
+        this.acceptBtn.text = 'Accept';
         this.acceptBtn.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+        this.acceptBtn.color = '#ffffff';
         this.acceptBtn.command = 'agent-code.acceptEdit';
         this.acceptBtn.tooltip = 'Accept and apply changes';
         this.acceptBtn.show();
 
         // Reject button — red background
-        this.rejectBtn = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, -1000);
-        this.rejectBtn.text = '$(x) Reject';
+        this.rejectBtn = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 998);
+        this.rejectBtn.text = 'Reject';
         this.rejectBtn.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
         this.rejectBtn.command = 'agent-code.rejectEdit';
         this.rejectBtn.tooltip = 'Reject and discard changes';
