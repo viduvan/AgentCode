@@ -212,17 +212,22 @@ export class ChatPanelProvider implements vscode.WebviewViewProvider {
         console.log('[Agent Code] handleChat:', text);
 
         // Build context (only for slash commands or selections)
+        // Note: /generate only uses context from explicit selection, not entire file
         const editor = vscode.window.activeTextEditor;
-        const needsContext = text.startsWith('/explain') || text.startsWith('/review') ||
-            text.startsWith('/edit') || text.startsWith('/generate') || text.startsWith('/file');
+        const needsFullContext = text.startsWith('/explain') || text.startsWith('/review') ||
+            text.startsWith('/edit') || text.startsWith('/file');
+        const needsSelectionOnly = text.startsWith('/generate');
         let context = '';
-        if (editor && needsContext) {
+        if (editor && needsFullContext) {
             const selection = editor.selection;
             context = selection.isEmpty
                 ? ContextBuilder.fromDocument(editor.document)
                 : ContextBuilder.fromSelection(editor);
-        } else if (editor && !editor.selection.isEmpty) {
-            context = ContextBuilder.fromSelection(editor);
+        } else if (editor && (needsSelectionOnly || !editor.selection.isEmpty)) {
+            // For /generate: only use selected code (not entire file)
+            if (!editor.selection.isEmpty) {
+                context = ContextBuilder.fromSelection(editor);
+            }
         }
 
         let system = 'You are a helpful coding assistant. Answer concisely using markdown. When providing code, wrap it in markdown code blocks with the language specified.';
