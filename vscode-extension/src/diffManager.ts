@@ -3,7 +3,7 @@
  *
  * Features:
  * - Uses vscode.diff for visual coloring (green = additions, red = deletions)
- * - Centered status bar buttons for Accept/Reject
+ * - CodeLens buttons directly on the code editor for Accept/Reject
  * - Supports both "edit" (modify existing) and "generate" (create new file) flows
  */
 import * as vscode from 'vscode';
@@ -19,26 +19,69 @@ interface PendingEdit {
     originalTempUri: vscode.Uri;
     modifiedTempUri: vscode.Uri;
     selection?: vscode.Range;
-    // Generate-specific
     suggestedFileName?: string;
     languageId?: string;
 }
 
+// ── CodeLens Provider — shows Accept/Reject on the code surface ──
+
+class DiffActionCodeLensProvider implements vscode.CodeLensProvider {
+    private pendingUri: vscode.Uri | null = null;
+    private description: string = '';
+    private _onDidChangeCodeLenses = new vscode.EventEmitter<void>();
+    readonly onDidChangeCodeLenses = this._onDidChangeCodeLenses.event;
+
+    setPending(uri: vscode.Uri | null, description: string = ''): void {
+        this.pendingUri = uri;
+        this.description = description;
+        this._onDidChangeCodeLenses.fire();
+    }
+
+    provideCodeLenses(document: vscode.TextDocument): vscode.CodeLens[] {
+        if (!this.pendingUri || document.uri.fsPath !== this.pendingUri.fsPath) {
+            return [];
+        }
+
+        const topLine = new vscode.Range(0, 0, 0, 0);
+        return [
+            new vscode.CodeLens(topLine, {
+                title: '$(file-diff) ' + this.description,
+                command: '',
+            }),
+            new vscode.CodeLens(topLine, {
+                title: '$(check) Accept',
+                command: 'agent-code.acceptEdit',
+            }),
+            new vscode.CodeLens(topLine, {
+                title: '$(x) Reject',
+                command: 'agent-code.rejectEdit',
+            }),
+        ];
+    }
+}
+
+// ── Diff Manager ─────────────────────────────────────────────────
+
 export class DiffManager {
     private pendingEdit: PendingEdit | null = null;
     private tempDir: string;
-    private acceptBtn?: vscode.StatusBarItem;
-    private rejectBtn?: vscode.StatusBarItem;
-    private separatorBtn?: vscode.StatusBarItem;
+    private codeLensProvider: DiffActionCodeLensProvider;
+    private codeLensDisposable: vscode.Disposable;
 
     constructor() {
         this.tempDir = path.join(os.tmpdir(), 'agent-code-diff');
         if (!fs.existsSync(this.tempDir)) {
             fs.mkdirSync(this.tempDir, { recursive: true });
         }
+
+        this.codeLensProvider = new DiffActionCodeLensProvider();
+        this.codeLensDisposable = vscode.languages.registerCodeLensProvider(
+            { pattern: '**' },
+            this.codeLensProvider,
+        );
     }
 
-    // ── Edit Flow: show diff between original and modified code ───
+    // ── Edit Flow ────────────────────────────────────────────────
 
     async showDiff(
         originalUri: vscode.Uri,
@@ -70,7 +113,6 @@ export class DiffManager {
             selection,
         };
 
-        // Open diff view — shows green for additions, red for deletions
         await vscode.commands.executeCommand(
             'vscode.diff',
             originalTempUri,
@@ -79,11 +121,10 @@ export class DiffManager {
             { preview: true },
         );
 
-        // Show centered Accept/Reject buttons in status bar
-        this.showActionButtons('Review changes and Accept or Reject');
+        this.codeLensProvider.setPending(modifiedTempUri, `Review: ${baseName}`);
     }
 
-    // ── Generate Flow: show diff with empty file → all green ─────
+    // ── Generate Flow ────────────────────────────────────────────
 
     async showNewFilePreview(
         code: string,
@@ -94,7 +135,6 @@ export class DiffManager {
 
         const timestamp = Date.now();
 
-        // Empty original → all code shows as green (additions)
         const originalTempPath = path.join(this.tempDir, `empty-${timestamp}-${suggestedFileName}`);
         const modifiedTempPath = path.join(this.tempDir, `generated-${timestamp}-${suggestedFileName}`);
 
@@ -115,7 +155,6 @@ export class DiffManager {
             languageId,
         };
 
-        // Open diff: empty vs generated → all code appears in GREEN
         await vscode.commands.executeCommand(
             'vscode.diff',
             originalTempUri,
@@ -124,49 +163,10 @@ export class DiffManager {
             { preview: true },
         );
 
-        this.showActionButtons(`New file: ${suggestedFileName}`);
+        this.codeLensProvider.setPending(modifiedTempUri, `New file: ${suggestedFileName}`);
     }
 
-    // ── Centered Status Bar Buttons ──────────────────────────────
-
-    private showActionButtons(description: string): void {
-        this.hideActionButtons();
-
-        // Description label — right side, visible
-        this.separatorBtn = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 1000);
-        this.separatorBtn.text = `$(file-diff) Agent Code: ${description}`;
-        this.separatorBtn.tooltip = 'Agent Code: Pending changes';
-        this.separatorBtn.color = new vscode.ThemeColor('editorInfo.foreground');
-        this.separatorBtn.show();
-
-        // Accept button — green background
-        this.acceptBtn = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 999);
-        this.acceptBtn.text = 'Accept';
-        this.acceptBtn.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
-        this.acceptBtn.color = '#ffffff';
-        this.acceptBtn.command = 'agent-code.acceptEdit';
-        this.acceptBtn.tooltip = 'Accept and apply changes';
-        this.acceptBtn.show();
-
-        // Reject button — red background
-        this.rejectBtn = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 998);
-        this.rejectBtn.text = 'Reject';
-        this.rejectBtn.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
-        this.rejectBtn.command = 'agent-code.rejectEdit';
-        this.rejectBtn.tooltip = 'Reject and discard changes';
-        this.rejectBtn.show();
-    }
-
-    private hideActionButtons(): void {
-        this.separatorBtn?.dispose();
-        this.acceptBtn?.dispose();
-        this.rejectBtn?.dispose();
-        this.separatorBtn = undefined;
-        this.acceptBtn = undefined;
-        this.rejectBtn = undefined;
-    }
-
-    // ── Accept / Reject handlers ─────────────────────────────────
+    // ── Accept / Reject ──────────────────────────────────────────
 
     async acceptEdit(): Promise<boolean> {
         if (!this.pendingEdit) {
@@ -178,34 +178,22 @@ export class DiffManager {
 
         try {
             if (pending.type === 'generate') {
-                // Generate: save to new file via save dialog
+                // Save directly to workspace folder — no dialog
                 const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri;
                 const fileName = pending.suggestedFileName || 'generated_code.txt';
-                const defaultUri = workspaceFolder
+                const saveUri = workspaceFolder
                     ? vscode.Uri.joinPath(workspaceFolder, fileName)
                     : vscode.Uri.file(path.join(os.homedir(), fileName));
 
-                const saveUri = await vscode.window.showSaveDialog({
-                    defaultUri,
-                    filters: this.getFileFilters(pending.languageId || ''),
-                    title: 'Lưu file generated',
-                });
+                fs.writeFileSync(saveUri.fsPath, pending.modifiedContent, 'utf-8');
+                await this.closeDiffTabs();
+                this.codeLensProvider.setPending(null);
+                this.cleanup();
 
-                if (saveUri) {
-                    fs.writeFileSync(saveUri.fsPath, pending.modifiedContent, 'utf-8');
-                    await this.closeDiffTabs();
-                    this.hideActionButtons();
-                    this.cleanup();
-
-                    const savedDoc = await vscode.workspace.openTextDocument(saveUri);
-                    await vscode.window.showTextDocument(savedDoc);
-                    vscode.window.showInformationMessage(`✅ File đã lưu: ${path.basename(saveUri.fsPath)}`);
-                    return true;
-                } else {
-                    // User cancelled save dialog — keep diff open
-                    vscode.window.showInformationMessage('Chưa lưu. Nhấn Accept lần nữa để lưu.');
-                    return false;
-                }
+                const savedDoc = await vscode.workspace.openTextDocument(saveUri);
+                await vscode.window.showTextDocument(savedDoc);
+                vscode.window.showInformationMessage(`File đã lưu: ${path.basename(saveUri.fsPath)}`);
+                return true;
             } else {
                 // Edit: apply changes to the original file
                 const { originalUri, modifiedContent, selection } = pending;
@@ -229,15 +217,15 @@ export class DiffManager {
                     await vscode.workspace.applyEdit(edit);
                 }
 
-                vscode.window.showInformationMessage('✅ Agent Code: Changes applied!');
+                vscode.window.showInformationMessage('Agent Code: Changes applied!');
                 await this.closeDiffTabs();
-                this.hideActionButtons();
+                this.codeLensProvider.setPending(null);
                 this.cleanup();
                 return true;
             }
         } catch (err: any) {
             vscode.window.showErrorMessage(`Failed to apply changes: ${err.message}`);
-            this.hideActionButtons();
+            this.codeLensProvider.setPending(null);
             this.cleanup();
             return false;
         }
@@ -249,9 +237,9 @@ export class DiffManager {
             return;
         }
 
-        vscode.window.showInformationMessage('❌ Agent Code: Changes rejected.');
+        vscode.window.showInformationMessage('Agent Code: Changes rejected.');
         await this.closeDiffTabs();
-        this.hideActionButtons();
+        this.codeLensProvider.setPending(null);
         this.cleanup();
     }
 
@@ -296,7 +284,8 @@ export class DiffManager {
     }
 
     dispose(): void {
-        this.hideActionButtons();
+        this.codeLensProvider.setPending(null);
+        this.codeLensDisposable.dispose();
         this.cleanup();
     }
 }
