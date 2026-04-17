@@ -1,11 +1,10 @@
 /**
- * Diff Manager — manages diff view with accept/reject for code edits.
+ * Diff Manager — manages diff view with accept/reject for code edits and generation.
  *
- * Flow:
- * 1. Original code is saved to a temp file
- * 2. Modified code is saved to another temp file
- * 3. vscode.diff opens both side-by-side
- * 4. User clicks Accept (write to real file) or Reject (discard)
+ * Features:
+ * - Uses vscode.diff for visual coloring (green = additions, red = deletions)
+ * - Centered status bar buttons for Accept/Reject
+ * - Supports both "edit" (modify existing) and "generate" (create new file) flows
  */
 import * as vscode from 'vscode';
 import * as path from 'path';
@@ -13,17 +12,24 @@ import * as fs from 'fs';
 import * as os from 'os';
 
 interface PendingEdit {
+    type: 'edit' | 'generate';
     originalUri: vscode.Uri;
     originalContent: string;
     modifiedContent: string;
     originalTempUri: vscode.Uri;
     modifiedTempUri: vscode.Uri;
     selection?: vscode.Range;
+    // Generate-specific
+    suggestedFileName?: string;
+    languageId?: string;
 }
 
 export class DiffManager {
     private pendingEdit: PendingEdit | null = null;
     private tempDir: string;
+    private acceptBtn?: vscode.StatusBarItem;
+    private rejectBtn?: vscode.StatusBarItem;
+    private separatorBtn?: vscode.StatusBarItem;
 
     constructor() {
         this.tempDir = path.join(os.tmpdir(), 'agent-code-diff');
@@ -32,23 +38,19 @@ export class DiffManager {
         }
     }
 
-    /**
-     * Show a diff between original and modified code.
-     * User can then Accept or Reject.
-     */
+    // ── Edit Flow: show diff between original and modified code ───
+
     async showDiff(
         originalUri: vscode.Uri,
         originalContent: string,
         modifiedContent: string,
         selection?: vscode.Range,
     ): Promise<void> {
-        // Clean up previous pending edit
         this.cleanup();
 
         const baseName = path.basename(originalUri.fsPath);
         const timestamp = Date.now();
 
-        // Write temp files
         const originalTempPath = path.join(this.tempDir, `original-${timestamp}-${baseName}`);
         const modifiedTempPath = path.join(this.tempDir, `modified-${timestamp}-${baseName}`);
 
@@ -59,6 +61,7 @@ export class DiffManager {
         const modifiedTempUri = vscode.Uri.file(modifiedTempPath);
 
         this.pendingEdit = {
+            type: 'edit',
             originalUri,
             originalContent,
             modifiedContent,
@@ -67,7 +70,7 @@ export class DiffManager {
             selection,
         };
 
-        // Open diff view
+        // Open diff view — shows green for additions, red for deletions
         await vscode.commands.executeCommand(
             'vscode.diff',
             originalTempUri,
@@ -76,70 +79,168 @@ export class DiffManager {
             { preview: true },
         );
 
-        // Show accept/reject notification
-        const action = await vscode.window.showInformationMessage(
-            'Agent Code: Review the changes above',
-            { modal: false },
-            '✅ Accept',
-            '❌ Reject',
-        );
-
-        if (action === '✅ Accept') {
-            await this.acceptEdit();
-        } else {
-            await this.rejectEdit();
-        }
+        // Show centered Accept/Reject buttons in status bar
+        this.showActionButtons('Review changes and Accept or Reject');
     }
 
-    /**
-     * Accept pending edit — write modified content to the real file.
-     */
+    // ── Generate Flow: show diff with empty file → all green ─────
+
+    async showNewFilePreview(
+        code: string,
+        suggestedFileName: string,
+        languageId: string,
+    ): Promise<void> {
+        this.cleanup();
+
+        const timestamp = Date.now();
+
+        // Empty original → all code shows as green (additions)
+        const originalTempPath = path.join(this.tempDir, `empty-${timestamp}-${suggestedFileName}`);
+        const modifiedTempPath = path.join(this.tempDir, `generated-${timestamp}-${suggestedFileName}`);
+
+        fs.writeFileSync(originalTempPath, '', 'utf-8');
+        fs.writeFileSync(modifiedTempPath, code, 'utf-8');
+
+        const originalTempUri = vscode.Uri.file(originalTempPath);
+        const modifiedTempUri = vscode.Uri.file(modifiedTempPath);
+
+        this.pendingEdit = {
+            type: 'generate',
+            originalUri: modifiedTempUri,
+            originalContent: '',
+            modifiedContent: code,
+            originalTempUri,
+            modifiedTempUri,
+            suggestedFileName,
+            languageId,
+        };
+
+        // Open diff: empty vs generated → all code appears in GREEN
+        await vscode.commands.executeCommand(
+            'vscode.diff',
+            originalTempUri,
+            modifiedTempUri,
+            `Agent Code: ${suggestedFileName} (Generated — New File)`,
+            { preview: true },
+        );
+
+        this.showActionButtons(`New file: ${suggestedFileName}`);
+    }
+
+    // ── Centered Status Bar Buttons ──────────────────────────────
+
+    private showActionButtons(description: string): void {
+        this.hideActionButtons();
+
+        // Description label (centered via priority 0)
+        this.separatorBtn = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, -998);
+        this.separatorBtn.text = `$(file-diff) ${description}`;
+        this.separatorBtn.tooltip = 'Agent Code: Pending changes';
+        this.separatorBtn.show();
+
+        // Accept button — green background
+        this.acceptBtn = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, -999);
+        this.acceptBtn.text = '$(check) Accept';
+        this.acceptBtn.backgroundColor = new vscode.ThemeColor('statusBarItem.warningBackground');
+        this.acceptBtn.command = 'agent-code.acceptEdit';
+        this.acceptBtn.tooltip = 'Accept and apply changes';
+        this.acceptBtn.show();
+
+        // Reject button — red background
+        this.rejectBtn = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, -1000);
+        this.rejectBtn.text = '$(x) Reject';
+        this.rejectBtn.backgroundColor = new vscode.ThemeColor('statusBarItem.errorBackground');
+        this.rejectBtn.command = 'agent-code.rejectEdit';
+        this.rejectBtn.tooltip = 'Reject and discard changes';
+        this.rejectBtn.show();
+    }
+
+    private hideActionButtons(): void {
+        this.separatorBtn?.dispose();
+        this.acceptBtn?.dispose();
+        this.rejectBtn?.dispose();
+        this.separatorBtn = undefined;
+        this.acceptBtn = undefined;
+        this.rejectBtn = undefined;
+    }
+
+    // ── Accept / Reject handlers ─────────────────────────────────
+
     async acceptEdit(): Promise<boolean> {
         if (!this.pendingEdit) {
             vscode.window.showWarningMessage('No pending Agent Code edit to accept.');
             return false;
         }
 
-        const { originalUri, modifiedContent, selection } = this.pendingEdit;
+        const pending = this.pendingEdit;
 
         try {
-            // If we have a selection, only replace that part
-            const editor = vscode.window.visibleTextEditors.find(
-                e => e.document.uri.fsPath === originalUri.fsPath
-            );
+            if (pending.type === 'generate') {
+                // Generate: save to new file via save dialog
+                const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri;
+                const fileName = pending.suggestedFileName || 'generated_code.txt';
+                const defaultUri = workspaceFolder
+                    ? vscode.Uri.joinPath(workspaceFolder, fileName)
+                    : vscode.Uri.file(path.join(os.homedir(), fileName));
 
-            if (editor && selection) {
-                await editor.edit(editBuilder => {
-                    editBuilder.replace(selection, modifiedContent);
+                const saveUri = await vscode.window.showSaveDialog({
+                    defaultUri,
+                    filters: this.getFileFilters(pending.languageId || ''),
+                    title: 'Lưu file generated',
                 });
+
+                if (saveUri) {
+                    fs.writeFileSync(saveUri.fsPath, pending.modifiedContent, 'utf-8');
+                    await this.closeDiffTabs();
+                    this.hideActionButtons();
+                    this.cleanup();
+
+                    const savedDoc = await vscode.workspace.openTextDocument(saveUri);
+                    await vscode.window.showTextDocument(savedDoc);
+                    vscode.window.showInformationMessage(`✅ File đã lưu: ${path.basename(saveUri.fsPath)}`);
+                    return true;
+                } else {
+                    // User cancelled save dialog — keep diff open
+                    vscode.window.showInformationMessage('Chưa lưu. Nhấn Accept lần nữa để lưu.');
+                    return false;
+                }
             } else {
-                // Replace entire file
-                const doc = await vscode.workspace.openTextDocument(originalUri);
-                const fullRange = new vscode.Range(
-                    doc.positionAt(0),
-                    doc.positionAt(doc.getText().length),
+                // Edit: apply changes to the original file
+                const { originalUri, modifiedContent, selection } = pending;
+
+                const editor = vscode.window.visibleTextEditors.find(
+                    e => e.document.uri.fsPath === originalUri.fsPath,
                 );
-                const edit = new vscode.WorkspaceEdit();
-                edit.replace(originalUri, fullRange, modifiedContent);
-                await vscode.workspace.applyEdit(edit);
+
+                if (editor && selection) {
+                    await editor.edit(editBuilder => {
+                        editBuilder.replace(selection, modifiedContent);
+                    });
+                } else {
+                    const doc = await vscode.workspace.openTextDocument(originalUri);
+                    const fullRange = new vscode.Range(
+                        doc.positionAt(0),
+                        doc.positionAt(doc.getText().length),
+                    );
+                    const edit = new vscode.WorkspaceEdit();
+                    edit.replace(originalUri, fullRange, modifiedContent);
+                    await vscode.workspace.applyEdit(edit);
+                }
+
+                vscode.window.showInformationMessage('✅ Agent Code: Changes applied!');
+                await this.closeDiffTabs();
+                this.hideActionButtons();
+                this.cleanup();
+                return true;
             }
-
-            vscode.window.showInformationMessage('✅ Agent Code: Changes applied!');
-
-            // Close diff tabs
-            await this.closeDiffTabs();
-            this.cleanup();
-            return true;
         } catch (err: any) {
             vscode.window.showErrorMessage(`Failed to apply changes: ${err.message}`);
+            this.hideActionButtons();
             this.cleanup();
             return false;
         }
     }
 
-    /**
-     * Reject pending edit — discard changes.
-     */
     async rejectEdit(): Promise<void> {
         if (!this.pendingEdit) {
             vscode.window.showWarningMessage('No pending Agent Code edit to reject.');
@@ -148,6 +249,7 @@ export class DiffManager {
 
         vscode.window.showInformationMessage('❌ Agent Code: Changes rejected.');
         await this.closeDiffTabs();
+        this.hideActionButtons();
         this.cleanup();
     }
 
@@ -155,9 +257,8 @@ export class DiffManager {
         return this.pendingEdit !== null;
     }
 
-    /**
-     * Clean up temp files.
-     */
+    // ── Internal helpers ─────────────────────────────────────────
+
     private cleanup(): void {
         if (this.pendingEdit) {
             try {
@@ -172,85 +273,8 @@ export class DiffManager {
         }
     }
 
-    /**
-     * Close the diff editor tabs.
-     */
     private async closeDiffTabs(): Promise<void> {
-        // Close active diff tab
         await vscode.commands.executeCommand('workbench.action.closeActiveEditor');
-    }
-
-    /**
-     * Show a preview of newly generated code with Accept/Reject.
-     * Accept → showSaveDialog to save the file.
-     * Reject → discard and close preview.
-     */
-    async showNewFilePreview(
-        code: string,
-        suggestedFileName: string,
-        languageId: string,
-    ): Promise<void> {
-        // Clean up any previous pending edit
-        this.cleanup();
-
-        const timestamp = Date.now();
-        const tempPath = path.join(this.tempDir, `generated-${timestamp}-${suggestedFileName}`);
-        fs.writeFileSync(tempPath, code, 'utf-8');
-
-        const tempUri = vscode.Uri.file(tempPath);
-
-        // Store as pending so cleanup works
-        this.pendingEdit = {
-            originalUri: tempUri,
-            originalContent: '',
-            modifiedContent: code,
-            originalTempUri: tempUri,
-            modifiedTempUri: tempUri,
-        };
-
-        // Open preview
-        const doc = await vscode.workspace.openTextDocument(tempUri);
-        await vscode.window.showTextDocument(doc, { preview: true });
-
-        // Show accept/reject
-        const action = await vscode.window.showInformationMessage(
-            `Agent Code: File "${suggestedFileName}" đã được tạo. Lưu file?`,
-            { modal: false },
-            '✅ Accept',
-            '❌ Reject',
-        );
-
-        if (action === '✅ Accept') {
-            // Determine default save path
-            const workspaceFolder = vscode.workspace.workspaceFolders?.[0]?.uri;
-            const defaultUri = workspaceFolder
-                ? vscode.Uri.joinPath(workspaceFolder, suggestedFileName)
-                : vscode.Uri.file(path.join(os.homedir(), suggestedFileName));
-
-            const saveUri = await vscode.window.showSaveDialog({
-                defaultUri,
-                filters: this.getFileFilters(languageId),
-                title: 'Lưu file generated',
-            });
-
-            if (saveUri) {
-                fs.writeFileSync(saveUri.fsPath, code, 'utf-8');
-                await this.closeDiffTabs();
-                this.cleanup();
-
-                // Open the saved file
-                const savedDoc = await vscode.workspace.openTextDocument(saveUri);
-                await vscode.window.showTextDocument(savedDoc);
-                vscode.window.showInformationMessage(`✅ File đã lưu: ${path.basename(saveUri.fsPath)}`);
-            } else {
-                // User cancelled save dialog — keep preview open
-                vscode.window.showInformationMessage('Chưa lưu. File preview vẫn mở.');
-            }
-        } else {
-            await this.closeDiffTabs();
-            this.cleanup();
-            vscode.window.showInformationMessage('❌ Đã hủy, file không được lưu.');
-        }
     }
 
     private getFileFilters(languageId: string): Record<string, string[]> {
@@ -270,6 +294,7 @@ export class DiffManager {
     }
 
     dispose(): void {
+        this.hideActionButtons();
         this.cleanup();
     }
 }
