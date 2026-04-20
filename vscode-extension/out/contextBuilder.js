@@ -35,29 +35,50 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ContextBuilder = void 0;
 /**
- * Context builder — gathers relevant code context from the editor.
+ * Context Builder — gathers relevant code context from workspace and editor.
+ *
+ * Provides:
+ * - Single file context (from selection or document)
+ * - Inline completion context (surrounding code)
+ * - Deep project tree scanning (recursive directory listing)
+ * - Multi-file reading (gather contents of key project files)
+ * - Project summary building (tree + key file contents for LLM)
  */
 const vscode = __importStar(require("vscode"));
+const fs = __importStar(require("fs"));
+const path = __importStar(require("path"));
 const config_1 = require("./config");
+/** Directories to always ignore when scanning. */
+const IGNORE_DIRS = new Set([
+    'node_modules', '.git', '__pycache__', '.vscode', '.idea',
+    'dist', 'build', 'out', '.next', '.nuxt', 'coverage',
+    '.mypy_cache', '.pytest_cache', 'venv', '.venv', 'env',
+    '.tox', '.eggs',
+]);
+const IGNORE_FILES = new Set([
+    'package-lock.json', 'yarn.lock', 'pnpm-lock.yaml',
+    '.DS_Store', 'Thumbs.db',
+]);
+/** Source code extensions we want to read. */
+const CODE_EXTENSIONS = new Set([
+    '.ts', '.tsx', '.js', '.jsx', '.py', '.java', '.go', '.rs',
+    '.c', '.cpp', '.h', '.hpp', '.cs', '.rb', '.php', '.swift',
+    '.kt', '.scala', '.vue', '.svelte', '.html', '.css', '.scss',
+    '.sql', '.sh', '.bash', '.yaml', '.yml', '.toml', '.json',
+    '.xml', '.md', '.txt', '.env', '.cfg', '.ini', '.conf',
+]);
 class ContextBuilder {
-    /**
-     * Build context from the current editor selection or entire file.
-     */
+    // ── Single File Context ──────────────────────────────────────
     static fromSelection(editor) {
         const selection = editor.selection;
         const doc = editor.document;
-        const cfg = (0, config_1.getConfig)();
         if (!selection.isEmpty) {
             const selectedText = doc.getText(selection);
             const startLine = selection.start.line + 1;
             return `=== File: ${doc.fileName} (lines ${startLine}-${selection.end.line + 1}) ===\n${selectedText}\n`;
         }
-        // Full file context (capped)
         return this.fromDocument(doc);
     }
-    /**
-     * Build context from a full document (capped to maxContextLines).
-     */
     static fromDocument(doc) {
         const cfg = (0, config_1.getConfig)();
         const totalLines = doc.lineCount;
@@ -67,7 +88,6 @@ class ContextBuilder {
             content = doc.getText();
         }
         else {
-            // Take first half and last half
             const halfMax = Math.floor(maxLines / 2);
             const firstPart = doc.getText(new vscode.Range(0, 0, halfMax, 0));
             const lastPart = doc.getText(new vscode.Range(totalLines - halfMax, 0, totalLines, 0));
@@ -75,9 +95,7 @@ class ContextBuilder {
         }
         return `=== File: ${doc.fileName} ===\n${content}\n`;
     }
-    /**
-     * Build context for inline completion — surrounding code around cursor.
-     */
+    // ── Inline Completion Context ────────────────────────────────
     static forInlineCompletion(doc, position) {
         const cfg = (0, config_1.getConfig)();
         const halfLines = Math.floor(cfg.maxContextLines / 2);
@@ -89,36 +107,222 @@ class ContextBuilder {
         const suffix = doc.getText(suffixRange);
         return { prefix, suffix };
     }
+    // ── Deep Project Tree ────────────────────────────────────────
     /**
-     * Get a workspace file tree summary (simple version).
+     * Get a recursive project tree (up to maxDepth levels deep).
      */
-    static async getProjectTree() {
+    static async getProjectTree(maxDepth = 4) {
         const folders = vscode.workspace.workspaceFolders;
         if (!folders || folders.length === 0) {
             return '(no workspace open)';
         }
-        const root = folders[0].uri;
-        const lines = [`📁 ${folders[0].name}/`];
+        const rootPath = folders[0].uri.fsPath;
+        const rootName = folders[0].name;
+        const lines = [`📁 ${rootName}/`];
+        this.scanDirSync(rootPath, '', 1, maxDepth, lines);
+        return lines.join('\n');
+    }
+    static scanDirSync(absDir, indent, currentDepth, maxDepth, lines) {
+        if (currentDepth > maxDepth) {
+            return;
+        }
+        let entries;
         try {
-            const entries = await vscode.workspace.fs.readDirectory(root);
-            const sorted = entries.sort((a, b) => {
-                if (a[1] !== b[1]) {
-                    return a[1] === vscode.FileType.Directory ? -1 : 1;
-                }
-                return a[0].localeCompare(b[0]);
-            });
-            for (const [name, type] of sorted.slice(0, 30)) {
-                if (name.startsWith('.') || name === 'node_modules' || name === '__pycache__') {
-                    continue;
-                }
-                const icon = type === vscode.FileType.Directory ? '📁' : '📄';
-                lines.push(`  ${icon} ${name}`);
-            }
+            entries = fs.readdirSync(absDir, { withFileTypes: true });
         }
         catch {
-            // ignore
+            return;
         }
-        return lines.join('\n');
+        // Sort: directories first, then alphabetically
+        entries.sort((a, b) => {
+            if (a.isDirectory() !== b.isDirectory()) {
+                return a.isDirectory() ? -1 : 1;
+            }
+            return a.name.localeCompare(b.name);
+        });
+        for (const entry of entries) {
+            if (entry.name.startsWith('.') && entry.name !== '.env') {
+                continue;
+            }
+            if (IGNORE_DIRS.has(entry.name)) {
+                continue;
+            }
+            if (IGNORE_FILES.has(entry.name)) {
+                continue;
+            }
+            if (entry.isDirectory()) {
+                lines.push(`${indent}  📁 ${entry.name}/`);
+                this.scanDirSync(path.join(absDir, entry.name), indent + '  ', currentDepth + 1, maxDepth, lines);
+            }
+            else {
+                lines.push(`${indent}  📄 ${entry.name}`);
+            }
+            // Cap total entries to prevent massive output
+            if (lines.length > 200) {
+                lines.push(`${indent}  ... (truncated)`);
+                return;
+            }
+        }
+    }
+    // ── Multi-File Reading ───────────────────────────────────────
+    /**
+     * Read the contents of multiple files, capped per-file and total.
+     */
+    static readFiles(filePaths, maxLinesPerFile = 80, maxTotalChars = 30000) {
+        const parts = [];
+        let totalChars = 0;
+        for (const filePath of filePaths) {
+            if (totalChars >= maxTotalChars) {
+                parts.push(`\n... (context limit reached, ${filePaths.length - parts.length} files skipped)`);
+                break;
+            }
+            try {
+                const content = fs.readFileSync(filePath, 'utf-8');
+                const lines = content.split('\n');
+                let trimmed;
+                if (lines.length <= maxLinesPerFile) {
+                    trimmed = content;
+                }
+                else {
+                    const half = Math.floor(maxLinesPerFile / 2);
+                    trimmed = lines.slice(0, half).join('\n')
+                        + `\n... (${lines.length - maxLinesPerFile} lines omitted) ...\n`
+                        + lines.slice(-half).join('\n');
+                }
+                const entry = `\n=== File: ${filePath} (${lines.length} lines) ===\n${trimmed}\n`;
+                parts.push(entry);
+                totalChars += entry.length;
+            }
+            catch {
+                // skip unreadable files
+            }
+        }
+        return parts.join('');
+    }
+    /**
+     * Find and read all source code files in the workspace.
+     */
+    static async readProjectFiles(maxFiles = 30, maxLinesPerFile = 60, maxTotalChars = 25000) {
+        const folders = vscode.workspace.workspaceFolders;
+        if (!folders || folders.length === 0) {
+            return '(no workspace open)';
+        }
+        const rootPath = folders[0].uri.fsPath;
+        const codeFiles = this.findCodeFiles(rootPath, maxFiles);
+        if (codeFiles.length === 0) {
+            return '(no source files found)';
+        }
+        return this.readFiles(codeFiles, maxLinesPerFile, maxTotalChars);
+    }
+    /**
+     * Find source code files in a directory (recursive).
+     * Priority files (package.json, etc.) come first.
+     */
+    static findCodeFiles(rootPath, maxFiles = 30) {
+        const files = [];
+        this.collectCodeFiles(rootPath, files, 0, 5);
+        // Sort by depth (root-level files first)
+        files.sort((a, b) => {
+            const depthA = a.split(path.sep).length;
+            const depthB = b.split(path.sep).length;
+            if (depthA !== depthB) {
+                return depthA - depthB;
+            }
+            return a.localeCompare(b);
+        });
+        // Prioritize config/key files
+        const priorityFiles = [
+            'package.json', 'tsconfig.json', 'pyproject.toml', 'Cargo.toml',
+            'go.mod', 'Makefile', 'Dockerfile', 'docker-compose.yml',
+            'README.md', '.env.example',
+        ];
+        const important = [];
+        const rest = [];
+        for (const f of files) {
+            const base = path.basename(f);
+            if (priorityFiles.includes(base)) {
+                important.push(f);
+            }
+            else {
+                rest.push(f);
+            }
+        }
+        return [...important, ...rest].slice(0, maxFiles);
+    }
+    static collectCodeFiles(dir, result, depth, maxDepth) {
+        if (depth > maxDepth) {
+            return;
+        }
+        let entries;
+        try {
+            entries = fs.readdirSync(dir, { withFileTypes: true });
+        }
+        catch {
+            return;
+        }
+        for (const entry of entries) {
+            if (entry.name.startsWith('.') && entry.name !== '.env' && entry.name !== '.env.example') {
+                continue;
+            }
+            if (IGNORE_DIRS.has(entry.name)) {
+                continue;
+            }
+            if (IGNORE_FILES.has(entry.name)) {
+                continue;
+            }
+            const fullPath = path.join(dir, entry.name);
+            if (entry.isDirectory()) {
+                this.collectCodeFiles(fullPath, result, depth + 1, maxDepth);
+            }
+            else {
+                const ext = path.extname(entry.name).toLowerCase();
+                if (CODE_EXTENSIONS.has(ext)) {
+                    // Skip very large files (>100KB)
+                    try {
+                        const stat = fs.statSync(fullPath);
+                        if (stat.size < 100_000) {
+                            result.push(fullPath);
+                        }
+                    }
+                    catch {
+                        // skip
+                    }
+                }
+            }
+        }
+    }
+    // ── Smart Context Gathering ──────────────────────────────────
+    /**
+     * Build a comprehensive project summary (tree + key files).
+     */
+    static async buildProjectSummary() {
+        const tree = await this.getProjectTree(4);
+        const files = await this.readProjectFiles(30, 60, 25000);
+        return `# Project Structure\n\n${tree}\n\n# Source Files\n${files}`;
+    }
+    /**
+     * Smart context: gather context based on what's available.
+     * - If user has selection → selected code
+     * - If file is open → active file + project tree
+     * - If no file open → full project scan
+     */
+    static async gatherSmartContext() {
+        const editor = vscode.window.activeTextEditor;
+        if (editor && !editor.selection.isEmpty) {
+            const code = this.fromSelection(editor);
+            return { context: code, source: `selection in ${path.basename(editor.document.fileName)}` };
+        }
+        if (editor) {
+            const fileContext = this.fromDocument(editor.document);
+            const tree = await this.getProjectTree(3);
+            return {
+                context: `# Active File\n${fileContext}\n\n# Project Tree\n${tree}`,
+                source: path.basename(editor.document.fileName),
+            };
+        }
+        // No file open — scan entire project
+        const summary = await this.buildProjectSummary();
+        return { context: summary, source: 'full project scan' };
     }
 }
 exports.ContextBuilder = ContextBuilder;

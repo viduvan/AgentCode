@@ -121,9 +121,15 @@ export class AgentWorkflow {
     private async executeChat(intent: IntentResult): Promise<void> {
         this.callbacks!.setThinking(true, '💬 Đang trả lời...');
 
+        // Gather project context to enrich the chat
+        const { context, source } = await ContextBuilder.gatherSmartContext();
+        const enrichedPrompt = context
+            ? `${intent.instruction}\n\n--- Project context (${source}) ---\n${context}`
+            : intent.instruction;
+
         const collected: string[] = [];
         await this.ollama.generate({
-            prompt: intent.instruction,
+            prompt: enrichedPrompt,
             system: Prompts.CHAT_SYSTEM,
             onToken: (token) => {
                 collected.push(token);
@@ -143,19 +149,14 @@ export class AgentWorkflow {
     private async executeExplain(intent: IntentResult): Promise<void> {
         this.callbacks!.setThinking(true, '📖 Đang đọc và phân tích code...');
 
+        // Gather context: selection > active file > full project
+        const { context, source } = await ContextBuilder.gatherSmartContext();
         const editor = vscode.window.activeTextEditor;
-        if (!editor) {
-            this.callbacks!.setThinking(false);
-            this.callbacks!.sendMessage('assistant', '⚠️ Không có file nào đang mở. Hãy mở file cần giải thích.');
-            return;
-        }
+        const lang = editor?.document.languageId || 'text';
 
-        const code = editor.selection.isEmpty
-            ? ContextBuilder.fromDocument(editor.document)
-            : ContextBuilder.fromSelection(editor);
-        const lang = editor.document.languageId;
+        this.callbacks!.setThinking(true, `📖 Đang phân tích ${source}...`);
 
-        const prompt = Prompts.buildExplainPrompt(code, lang, intent.instruction);
+        const prompt = Prompts.buildExplainPrompt(context, lang, intent.instruction);
 
         const collected: string[] = [];
         await this.ollama.generate({
@@ -267,16 +268,14 @@ export class AgentWorkflow {
     private async executeReview(intent: IntentResult): Promise<void> {
         this.callbacks!.setThinking(true, '🔎 Đang review code...');
 
+        // Gather context: selection > active file > full project
+        const { context, source } = await ContextBuilder.gatherSmartContext();
         const editor = vscode.window.activeTextEditor;
-        if (!editor) {
-            this.callbacks!.setThinking(false);
-            this.callbacks!.sendMessage('assistant', '⚠️ Không có file nào đang mở. Hãy mở file cần review.');
-            return;
-        }
+        const lang = editor?.document.languageId || 'text';
 
-        const code = ContextBuilder.fromDocument(editor.document);
-        const lang = editor.document.languageId;
-        const prompt = Prompts.buildReviewPrompt(code, lang, intent.instruction);
+        this.callbacks!.setThinking(true, `🔎 Đang review ${source}...`);
+
+        const prompt = Prompts.buildReviewPrompt(context, lang, intent.instruction);
 
         const collected: string[] = [];
         await this.ollama.generate({
@@ -298,17 +297,14 @@ export class AgentWorkflow {
     // ── Plan (Multi-step) ────────────────────────────────────────────
 
     private async executePlan(intent: IntentResult): Promise<void> {
-        this.callbacks!.setThinking(true, '🧠 Đang lập kế hoạch...');
+        this.callbacks!.setThinking(true, '🧠 Đang quét dự án và lập kế hoạch...');
 
-        // 1. Get project tree
-        const projectTree = await ContextBuilder.getProjectTree();
+        // 1. Get full project summary (tree + source files)
+        const projectTree = await ContextBuilder.getProjectTree(4);
+        const projectFiles = await ContextBuilder.readProjectFiles(20, 40, 15000);
 
-        // 2. Get some context from active file
-        const editor = vscode.window.activeTextEditor;
-        let context = '';
-        if (editor) {
-            context = ContextBuilder.fromDocument(editor.document);
-        }
+        // 2. Combine tree + file contents as context
+        const context = projectFiles;
 
         // 3. Ask LLM to create a plan
         const prompt = Prompts.buildPlanPrompt(intent.instruction, projectTree, context || undefined);

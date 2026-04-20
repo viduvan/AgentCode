@@ -122,7 +122,7 @@ info "VS Code đã mở tại vscode-extension/"
 # ── Hướng dẫn sử dụng ─────────────────────────────────────────────
 echo ""
 echo "═══════════════════════════════════════════════════"
-echo -e "  ${GREEN}✅ Mọi thứ đã sẵn sàng!${NC}"
+echo -e "  ${GREEN} Mọi thứ đã sẵn sàng!${NC}"
 echo "═══════════════════════════════════════════════════"
 echo ""
 echo -e "  ${CYAN}Trong VS Code:${NC}"
