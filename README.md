@@ -1,4 +1,4 @@
-# 🤖 AgentCode
+# AgentCode
 
 **AI-powered CLI Coding Assistant (Local LLM Engine)**
 
@@ -10,16 +10,16 @@
 
 ---
 
-## ⚡ Các tính năng chính
+## Tính năng chính
 
-- 💻 **CLI Gọn nhẹ**: Giao tiếp trực tiếp qua terminal thông qua lệnh `agent-code`.
-- 🔒 **Bảo mật tuyệt đối**: Mọi dữ liệu mã nguồn đều được xử lý ở Local, không gửi lên bất kỳ server ngoài nào.
-- 🛠️ **Hỗ trợ đa tác vụ**: Tự động sinh code, tìm lỗi (review), giải thích code (explain), chỉnh sửa (edit).
-- 🔄 **Quản lý Git tích hợp**: Tự động rẽ nhánh, tạo patch, giúp bạn dễ dàng review lại code AI sinh ra trước khi commit.
+- **CLI Gọn nhẹ**: Giao tiếp trực tiếp qua terminal thông qua lệnh `agent-code`.
+- **Bảo mật tuyệt đối**: Mọi dữ liệu mã nguồn đều được xử lý ở Local, không gửi lên bất kỳ server ngoài nào.
+- **Hỗ trợ đa tác vụ**: Tự động sinh code, tìm lỗi (review), giải thích code (explain), chỉnh sửa (edit).
+- **Quản lý Git tích hợp**: Tự động rẽ nhánh, tạo patch, giúp bạn dễ dàng review lại code AI sinh ra trước khi commit.
 
 ---
 
-## 🚀 Cài đặt (Installation)
+## Cài đặt (Installation)
 
 ### Yêu cầu hệ thống
 - **Python**: `>= 3.10`
@@ -41,7 +41,7 @@ agent-code --help
 
 ---
 
-## 🛠️ Hướng dẫn sử dụng (Usage)
+## Hướng dẫn sử dụng (Usage)
 
 ### 1. `edit` — Sửa đổi mã nguồn theo yêu cầu
 Tự động chỉnh sửa mã nguồn dựa trên prompt bằng cách tạo file patch/nhánh mới:
@@ -80,7 +80,7 @@ agent-code config --url http://localhost:11434
 
 ---
 
-## 🏗️ Kiến trúc luồng xử lý (Architecture Flow)
+## Kiến trúc luồng xử lý (Architecture Flow)
 
 Kiến trúc bên dưới thể hiện cách **AgentCode** xử lý một yêu cầu từ người dùng:
 
